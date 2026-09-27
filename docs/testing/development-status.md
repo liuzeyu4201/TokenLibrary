@@ -2,6 +2,8 @@
 
 核对时间：2026-09-27 03:35（Asia/Shanghai）；Core联合证据截至03:02、模型完整截至03:33、浏览器完整截至03:29，独立内容核验及原生片段按各行标注。这是当前证据账本，不是完成声明。原 F01—F31 与新增 L01—L30 全部保留；功能已经接上、自动测试通过、原生用户旅程通过是三个不同结论。
 
+2026-09-27 补充：上传令牌导入状态、PDF 原件更换、登录限制、blob 修复、加密 PDF 标记和 `changes_available` 通知已有实现。命令：`go test -count=1 ./internal/api -run 'TestUploadTokenImportStatus|TestServerContractGaps|TestChangesAvailableDoesNotReplaceHTTPPull'`，以及 `swift test --filter testReplacingPDFOriginalKeepsTheItemAndMarksOldCoordinatesForReview`。这些命令在本轮退出 0。详见 [待实现](../plans/unimplemented.md)。
+
 ## 已核实证据与边界
 
 | 证据 | 当前可证明的范围 | 不可据此推断 |
@@ -109,7 +111,7 @@
 | L19 | 单篇外部打开，图片和来源可用 | ZIP 含 Markdown、media、metadata.json；Core 用系统 unzip 检验 | Mac外部Markdown预览与iOSFiles解包/来源说明、PNG预览通过；iOS目录回导副本仅图片路径重写，六处PNGhash同，原件rev23保持。普通相对来源说明链接未复制有提示；专用URL仍需原库。 |
 | L20 | 继续编辑不恢复专题其他成员 | 归档只改对象，Catalog不级联测试；归档Markdown已接阅读模式与明确“继续编辑”，浏览器只读切换回归通过 | Mac归档笔记继续编辑及独立恢复PDF不恢复专题通过；iOS回导副本归档只读→继续编辑及三方revision/正文不变通过。iOS共享专题成员组合仍待。 |
 | L21 | 同名/同 DOI 不自动覆盖原件 | UUID 与文件名后缀，DOI 是普通 metadata；API 同名测试 | Mac同hash/同DOI连续导入保留独立ID；iOS同一夹具再次导入按_2后缀生成独立对象，未覆盖旧原文。不同内容版本同DOI、iOS书目DOI整理仍待。 |
-| L22 | 版本变化不复用旧坐标 | CatalogSourceState hash、来源链接版本保护；PDF模型保留needs_review/未知状态并按pdfBlobId过滤显示与导出；Core版本切换/旧字段兼容专项通过 | iOS指定PDF经[正常API换版闭环](pdf-version-control.md)：旧位置不恢复、2条待核对无跳页/不误绘、旧Gamma来源从1页仍不跳旧3页、真实导出零旧批注均通过；明确API恢复后来源3/3与原批注恢复。当前无替换原件GUI，双端并发换版/用户重新定位仍待。 |
+| L22 | 版本变化不复用旧坐标 | CatalogSourceState hash、来源链接版本保护；PDF模型保留needs_review/未知状态并按pdfBlobId过滤显示与导出；Core版本切换/旧字段兼容专项通过 | iOS指定PDF经[正常API换版闭环](pdf-version-control.md)：旧位置不恢复、2条待核对无跳页/不误绘、旧Gamma来源从1页仍不跳旧3页、真实导出零旧批注均通过；明确API恢复后来源3/3与原批注恢复。资料详情已有「更换 PDF 原件」，旧批注标为待核对；双端并发换版/用户重新定位仍待。 |
 | L23 | 连续重试不重复文件/关系/引用 | Core/API operationId、分块初始化/完成、专题集合、excerptID 测试 | Mac双击摘录不重复、重复相关项被选择器排除；iOS03:15真实双击已有目标只一excerpt/一正文追加/一sent操作、666ID不增；照片样本assets/blob/上传各1。其余创建快速重复/失败取消重试仍待。 |
 | L24 | 原因、最近成功时间、行动入口 | AppModel中文错误/取消/重试；最近成功时间按store路径作用域持久化，仅成功同步后记录；跨重启/切库/失败不更新的模型回归通过 | Mac维护/超时/过期/本地错误保留通过；iOS错密码/初始同步、麦克风拒绝/过期重登、PDF拒绝原因及成功同步不清本地错误已验。iOS受控服务无响应时明确超时/重试、旧成功时间不前进已验。TLS/DNS/connection refused与其他权限仍待。 |
 | L25 | 连接成功不等于全库同步完成 | testConnection 只 health，requestSync 成功才资料已同步，Core HTTP 覆盖 | iOS连接探测、登录后同步过程和625项完成后待提交0分别观察；02:39Core真实HTTP失败/重试/旧内容可用已有联合证明；02:58—03:00 Mac新PDF503明确重试/原因、旧缓存可读且可编辑，最近成功故障时不前进，恢复后自动完成并校验完整附件。Mac03:25—34地址格式/拒绝连接/HTML错误与改回healthy可见；426旧包为通用HTTP提示，03:39新connectionfinal已明确版本不兼容和保留本机资料指引；进入本机库原笔记/pending1仍在且连接banner清除，见[连接夹具](connection-error-native.md)。iOS对应下载故障、剩余资料复杂进度仍待。 |

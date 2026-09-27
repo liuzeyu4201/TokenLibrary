@@ -112,6 +112,7 @@ make start
 | 理解个人图书馆 | [产品设计](docs/product/personal-library-archive.md) |
 | 看当前证据和未关闭项 | [开发与验收状态](docs/testing/development-status.md) |
 | 看实施顺序 | [实施路线](docs/plans/roadmap.md) |
+| 看还没有的能力 | [待实现](docs/plans/unimplemented.md) |
 | 查某类验收记录 | [测试索引](docs/testing/README.md) |
 | 看已经落地的改动 | [实施记录](docs/implementation/README.md) |
 | 备份和恢复 | [备份、保留期与隔离恢复](docs/operations/backup-restore.md) |

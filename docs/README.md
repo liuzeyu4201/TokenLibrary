@@ -11,6 +11,7 @@
 | 理解个人图书馆怎么用 | [产品设计](product/personal-library-archive.md) |
 | 看当前证据和未关闭项 | [开发与验收状态](testing/development-status.md) |
 | 看实施顺序和退出标准 | [实施路线](plans/roadmap.md) |
+| 看还没有的能力 | [待实现](plans/unimplemented.md) |
 | 查某类验收记录 | [测试索引](testing/README.md) |
 | 看已经落地的改动 | [实施记录](implementation/README.md) |
 | 部署、备份、恢复 | [部署与连接排查](operations/deployment.md)、[备份、保留期与隔离恢复](operations/backup-restore.md) |
@@ -23,7 +24,7 @@
 | --- | --- | --- |
 | 产品 | [个人图书馆与档案馆](product/personal-library-archive.md) | 本页 |
 | 研究 | [体验评估](research/product-experience-audit.md)、[参考产品](research/reference-products.md)、[服务端可靠性调查](research/server-reliability-audit.md) | 本页 |
-| 路线 | [实施路线](plans/roadmap.md) | 本页 |
+| 路线 | [实施路线](plans/roadmap.md)、[待实现](plans/unimplemented.md) | 本页 |
 | 架构 | [组件边界](architecture/README.md) | 该页 |
 | 实施 | `implementation/` 下各篇记录 | [实施索引](implementation/README.md) |
 | 验收 | `testing/` 下各篇证据 | [测试索引](testing/README.md)；完成度看 [总账](testing/development-status.md) |
