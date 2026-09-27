@@ -578,8 +578,49 @@ func (s *Server) importFile(c *gin.Context) {
 }
 
 func (s *Server) importStatus(c *gin.Context) {
-	c.Request.URL.Path = "/api/v1/sync/operations/" + c.Param("operationId")
-	s.getOp(c)
+	id, err := uuid.Parse(c.Param("operationId"))
+	if err != nil {
+		c.JSON(404, errBody(c, "NOT_FOUND", "op", false))
+		return
+	}
+	var status string
+	var objectID uuid.UUID
+	var revision int64
+	var raw []byte
+	err = s.S.Pool.QueryRow(c, `SELECT status, object_id, COALESCE(result_revision,0), result_json
+		FROM operations
+		WHERE library_id=$1 AND epoch=$2 AND operation_id=$3 AND principal_kind='upload'`,
+		s.S.LibID, s.S.Epoch, id).Scan(&status, &objectID, &revision, &raw)
+	if err != nil {
+		c.JSON(404, errBody(c, "NOT_FOUND", "op", false))
+		return
+	}
+	var stored synceng.OpResult
+	_ = json.Unmarshal(raw, &stored)
+	if stored.ObjectID != uuid.Nil {
+		objectID = stored.ObjectID
+	}
+	if stored.Revision != 0 {
+		revision = stored.Revision
+	}
+	var gone bool
+	err = s.S.Pool.QueryRow(c, `SELECT EXISTS(SELECT 1 FROM tombstones WHERE library_id=$1 AND object_id=$2) OR EXISTS(SELECT 1 FROM objects WHERE library_id=$1 AND id=$2 AND purge_at<=now())`, s.S.LibID, objectID).Scan(&gone)
+	if err != nil {
+		c.JSON(503, errBody(c, "UNAVAILABLE", "database", true))
+		return
+	}
+	if gone {
+		c.JSON(410, errBody(c, "GONE", "expired", false))
+		return
+	}
+	c.JSON(200, gin.H{"data": gin.H{
+		"operationId": id.String(),
+		"status":      status,
+		"objectId":    objectID.String(),
+		"name":        stored.FinalName,
+		"parentId":    stored.ParentID.String(),
+		"revision":    strconv.FormatInt(revision, 10),
+	}, "requestId": reqID(c)})
 }
 
 func (s *Server) ws(c *gin.Context) {

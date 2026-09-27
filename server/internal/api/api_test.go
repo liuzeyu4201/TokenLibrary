@@ -431,6 +431,72 @@ func importFile(t *testing.T, base, tok, epoch, name, content string) string {
 	return b
 }
 
+func TestUploadTokenImportStatus(t *testing.T) {
+	st, cfg := testdb.Start(t)
+	defer st.Close()
+	ts := httptest.NewServer(api.New(cfg, st, &jobs.Runner{S: st}))
+	defer ts.Close()
+	uploadTok := "local-upload-token-32-bytes-min!!"
+	dev := uuid.NewString()
+	res := post(t, ts.URL+"/api/v1/auth/login", fmt.Sprintf(`{"username":"token","password":"local-dev-pass","deviceId":%q,"deviceName":"t","platform":"mac"}`, dev), "", "", "")
+	var login struct {
+		Data struct {
+			SessionToken, Epoch, RootID, DeviceID string
+		} `json:"data"`
+	}
+	mustJSON(t, read(t, res), &login)
+	secret := "session-only-snapshot-" + uuid.NewString()
+	sessionOp := uuid.NewString()
+	sessionObj := uuid.NewString()
+	payload := fmt.Sprintf(`{"protocolVersion":1,"operationId":%q,"epoch":%q,"deviceId":%q,"objectId":%q,"action":"createMarkdown","desiredSnapshot":{"name":"private.md","parentId":%q,"markdownSource":%s}}`,
+		sessionOp, login.Data.Epoch, login.Data.DeviceID, sessionObj, login.Data.RootID, jsonStr(secret))
+	res = post(t, ts.URL+"/api/v1/sync/operations", payload, login.Data.SessionToken, login.Data.Epoch, sessionOp)
+	if res.StatusCode != 201 {
+		t.Fatalf("session create %d %s", res.StatusCode, read(t, res))
+	}
+	_ = read(t, res)
+
+	res = get(t, ts.URL+"/api/v1/objects/"+sessionObj, uploadTok, login.Data.Epoch)
+	if res.StatusCode != 401 {
+		t.Fatalf("upload token object read %d %s", res.StatusCode, read(t, res))
+	}
+	_ = read(t, res)
+
+	res = get(t, ts.URL+"/api/v1/imports/"+sessionOp, uploadTok, login.Data.Epoch)
+	stolen := read(t, res)
+	if res.StatusCode != 404 {
+		t.Fatalf("upload token must not read a session operation, got %d %s", res.StatusCode, stolen)
+	}
+	if strings.Contains(stolen, secret) {
+		t.Fatalf("session snapshot leaked: %s", stolen)
+	}
+
+	ownName := "upload-" + uuid.NewString()[:8] + ".md"
+	ownBody := importFile(t, ts.URL, uploadTok, login.Data.Epoch, ownName, "# imported\n")
+	var imported struct {
+		Data struct {
+			OperationID string `json:"operationId"`
+		} `json:"data"`
+	}
+	mustJSON(t, ownBody, &imported)
+	if imported.Data.OperationID == "" {
+		t.Fatalf("import response missing operationId: %s", ownBody)
+	}
+	res = get(t, ts.URL+"/api/v1/imports/"+imported.Data.OperationID, uploadTok, login.Data.Epoch)
+	statusBody := read(t, res)
+	if res.StatusCode != 200 {
+		t.Fatalf("own import status %d %s", res.StatusCode, statusBody)
+	}
+	if strings.Contains(statusBody, secret) || strings.Contains(statusBody, "snapshot") || strings.Contains(statusBody, "markdownSource") {
+		t.Fatalf("import status returned a document snapshot: %s", statusBody)
+	}
+	for _, want := range []string{imported.Data.OperationID, ownName, `"status"`} {
+		if !strings.Contains(statusBody, want) {
+			t.Fatalf("import status missing %s in %s", want, statusBody)
+		}
+	}
+}
+
 func importRaw(t *testing.T, base, tok, epoch, name, content string) *http.Response {
 	t.Helper()
 	var buf bytes.Buffer
