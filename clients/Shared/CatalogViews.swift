@@ -106,7 +106,7 @@ struct CatalogWorkspaceView: View {
             if hasSelection {
                 HStack(alignment: .top, spacing: 12) {
                     Text((filters.summary.isEmpty ? "" : filters.summary + " · ") + "按" + sort.title + "排序")
-                        .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.caption).foregroundStyle(LibraryPalette.muted).frame(maxWidth: .infinity, alignment: .leading)
                     Button("清除筛选") { filters = CatalogViewFilters(); sort = .title }
                         .font(.caption)
                 }.padding(.horizontal).padding(.bottom, 8)
@@ -342,7 +342,7 @@ private struct CatalogFilterSheet: View {
                             }
                         }
                         Text("作者按名称匹配；标签按完整名称匹配。输入文字可查找标签建议。未填写年份的资料不会出现在年份筛选结果中。")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(LibraryPalette.muted)
                     }
                     Section("阅读与保存") {
                         if section != .reading {
@@ -360,7 +360,7 @@ private struct CatalogFilterSheet: View {
                             ForEach(CatalogAvailabilityFilter.allCases, id: \.self) { Text($0.title).tag($0) }
                         }
                         Text("原件已下载与有可搜索文字不同；扫描 PDF 也可以在本机阅读。")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(LibraryPalette.muted)
                     }
                 }
                 Section("排序") {
@@ -394,13 +394,13 @@ private struct CatalogDocumentRow: View {
                 .frame(width: 32).padding(.top, 3)
             VStack(alignment: .leading, spacing: 5) {
                 Text(document.catalogTitle).font(.headline).multilineTextAlignment(.leading)
-                if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+                if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(LibraryPalette.muted).lineLimit(2) }
                 HStack(spacing: 8) {
                     if document.catalog.archived { Label("归档", ink: "archivebox") }
                     else if document.catalog.inbox { Label("待整理", ink: "tray") }
                     if document.kind != .folder { Text(document.catalog.readingStatus.title) }
                     Text(document.status.rawValue)
-                }.font(.caption2).foregroundStyle(.secondary)
+                }.font(.caption2).foregroundStyle(LibraryPalette.muted)
             }
         }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
     }
@@ -489,10 +489,10 @@ private struct CatalogSelectionCandidateRow: View {
             InkGlyph(name: candidate.symbol).frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 4) {
                 Text(candidate.title).font(.headline).multilineTextAlignment(.leading)
-                Text("文件：" + candidate.filename).font(.caption).foregroundStyle(.secondary)
-                Text(candidate.folderPath).font(.caption).foregroundStyle(.secondary)
+                Text("文件：" + candidate.filename).font(.caption).foregroundStyle(LibraryPalette.muted)
+                Text(candidate.folderPath).font(.caption).foregroundStyle(LibraryPalette.muted)
                 Text(candidate.typeLabel + (candidate.archived ? " · 已归档" : ""))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(LibraryPalette.muted)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -541,7 +541,7 @@ struct CatalogDocumentSelectionSheet: View {
                             Text(query.isEmpty
                                  ? (purpose == .related ? "当前资料及已关联的资料不会重复显示。" : "可选择未归档的 Markdown 笔记，或新建阅读笔记。")
                                  : "尝试文件名、所在目录、作者或资料类型。")
-                                .font(.subheadline).foregroundStyle(.secondary)
+                                .font(.subheadline).foregroundStyle(LibraryPalette.muted)
                             if !query.isEmpty { Button("清除搜索") { query = "" } }
                         }.padding(.vertical, 8)
                     }
@@ -598,7 +598,7 @@ private struct CatalogReadingPositionRow: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(record.title).font(.subheadline.weight(.semibold))
             Text(record.summary)
-            Text("更新于 \(updated)").font(.caption).foregroundStyle(.secondary)
+            Text("更新于 \(updated)").font(.caption).foregroundStyle(LibraryPalette.muted)
         }
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -766,7 +766,7 @@ struct CatalogInspectorView: View {
                         .buttonStyle(InkButtonStyle())
                         .accessibilityLabel("整理完成，移出收件箱")
                     Text("点这里即可离开收件箱。标题、作者和专题可以稍后补，阅读不受影响。")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(LibraryPalette.muted)
                 }
             }
             if doc.catalog.archived {
@@ -785,7 +785,7 @@ struct CatalogInspectorView: View {
             }
             if !notice.isEmpty {
                 Section {
-                    Text(notice).foregroundStyle(.secondary).accessibilityLabel(notice)
+                    Text(notice).foregroundStyle(LibraryPalette.muted).accessibilityLabel(notice)
                     if excerptRefreshNeeded { Button("重新载入资料") { refreshAfterSavedExcerpt() } }
                 }
             }
@@ -875,7 +875,7 @@ struct CatalogInspectorView: View {
             }
             Button("保存资料信息") { saveDraft() }.disabled(doc.catalog.archived || !hasDraftChanges || doc.state != "active")
             if hasDraftChanges {
-                Text("资料信息尚未保存；请点“完成”选择保存或放弃后离开。").font(.caption).foregroundStyle(.secondary)
+                Text("资料信息尚未保存；请点“完成”选择保存或放弃后离开。").font(.caption).foregroundStyle(LibraryPalette.muted)
                 Button("重新载入最新信息") { confirmReload = true }
             }
         } header: { Text("资料信息") } footer: {
@@ -886,7 +886,7 @@ struct CatalogInspectorView: View {
     private var organizationSection: some View {
         Section("整理") {
             if doc.kind != .folder {
-                if topics.isEmpty { Text("尚无专题，可在资料库中新建。 ").foregroundStyle(.secondary) }
+                if topics.isEmpty { Text("尚无专题，可在资料库中新建。 ").foregroundStyle(LibraryPalette.muted) }
                 ForEach(topics, id: \.id) { topic in
                     Toggle(topic.catalogTitle + (topic.catalog.archived ? "（已归档）" : ""), isOn: Binding(get: { doc.catalog.topicIDs.contains(topic.id) }, set: { included in
                         perform { _ = try store.setCatalogTopic(id: doc.id, topicID: topic.id, included: included) }
@@ -894,13 +894,13 @@ struct CatalogInspectorView: View {
                 }
                 ForEach(doc.catalog.topicIDs.filter { id in !topics.contains(where: { $0.id == id }) }, id: \.self) { id in
                     HStack {
-                        Text("专题已删除或尚未载入").foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        Text("专题已删除或尚未载入").foregroundStyle(LibraryPalette.muted).fixedSize(horizontal: false, vertical: true)
                         Spacer()
                         Button("移除关联") { perform { _ = try store.setCatalogTopic(id: doc.id, topicID: id, included: false) } }
                     }
                 }
             } else {
-                Text("专题成员通过“加入专题”关联，移出专题不会删除原件。 ").font(.caption).foregroundStyle(.secondary)
+                Text("专题成员通过“加入专题”关联，移出专题不会删除原件。 ").font(.caption).foregroundStyle(LibraryPalette.muted)
             }
             if !doc.catalog.archived { Button("归档") { perform { _ = try store.setCatalogArchived(id: doc.id, archived: true) } } }
             if doc.kind == .pdf && doc.state == "active" && !doc.catalog.archived {
@@ -908,7 +908,7 @@ struct CatalogInspectorView: View {
                     .buttonStyle(InkButtonStyle())
                     .accessibilityLabel("更换 PDF 原件")
                 Text("更换后仍是同一份资料。旧批注和摘录位置会标成待核对，上一份原件不会被覆盖。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(LibraryPalette.muted)
             }
         }
     }
@@ -981,11 +981,11 @@ struct CatalogInspectorView: View {
 
     @ViewBuilder private var referencesSection: some View {
         Section("来源摘录") {
-            if doc.catalog.excerpts.isEmpty { Text("这份资料还没有引用摘录。 ").foregroundStyle(.secondary) }
+            if doc.catalog.excerpts.isEmpty { Text("这份资料还没有引用摘录。 ").foregroundStyle(LibraryPalette.muted) }
             ForEach(doc.catalog.excerpts) { excerpt in
                 VStack(alignment: .leading, spacing: 8) {
                     if !excerpt.quote.isEmpty { Text(excerpt.quote).textSelection(.enabled) }
-                    if !excerpt.comment.isEmpty { Text("我的评论：" + excerpt.comment).foregroundStyle(.secondary) }
+                    if !excerpt.comment.isEmpty { Text("我的评论：" + excerpt.comment).foregroundStyle(LibraryPalette.muted) }
                     Text(excerpt.sourceLabel).font(.caption)
                     sourceButton(excerpt)
                 }.padding(.vertical, 5)
@@ -993,7 +993,7 @@ struct CatalogInspectorView: View {
         }
         Section("引用此资料的笔记") {
             let backlinks = documents.filter { $0.state == "active" && ($0.catalog.sourceIDs.contains(doc.id) || $0.catalog.excerpts.contains { $0.sourceID == doc.id }) }
-            if backlinks.isEmpty { Text("加入阅读笔记后，引用会出现在这里。 ").foregroundStyle(.secondary) }
+            if backlinks.isEmpty { Text("加入阅读笔记后，引用会出现在这里。 ").foregroundStyle(LibraryPalette.muted) }
             ForEach(backlinks, id: \.id) { item in Button(item.catalogTitle) { requestLeave(.document(item)) } }
         }
         Section("相关资料") {
@@ -1007,7 +1007,7 @@ struct CatalogInspectorView: View {
                         VStack(alignment: .leading) {
                             Text(entry.document?.catalogTitle ?? "资料已删除或尚未载入")
                             Text(entry.document?.state == "trashed" ? "已在回收站，关联仍保留。" : "原资料当前不可用，仍可移除关联。")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(LibraryPalette.muted)
                         }
                     }
                     Spacer()
@@ -1027,13 +1027,13 @@ struct CatalogInspectorView: View {
         return Button { documentSelection = purpose } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(purpose == .related ? "选择资料" : "加入笔记").font(.caption).foregroundStyle(.secondary)
+                    Text(purpose == .related ? "选择资料" : "加入笔记").font(.caption).foregroundStyle(LibraryPalette.muted)
                     if let candidate { CatalogSelectionCandidateRow(candidate: candidate) }
                     else if selectedID.isEmpty { Text(purpose == .related ? "搜索并选择相关资料" : "新建阅读笔记") }
-                    else { Text("原选择已不可用，请重新选择").foregroundStyle(.secondary) }
+                    else { Text("原选择已不可用，请重新选择").foregroundStyle(LibraryPalette.muted) }
                 }
                 Spacer(minLength: 8)
-                InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(.secondary)
+                InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(LibraryPalette.muted)
             }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain)
     }
@@ -1046,7 +1046,7 @@ struct CatalogInspectorView: View {
             if !doc.catalog.sourceURL.isEmpty, let url = URL(string: doc.catalog.sourceURL), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
                 Link("打开来源网站", destination: url)
             }
-            Text("归档不等于备份成功。同步状态以服务器确认为准。 ").font(.caption).foregroundStyle(.secondary)
+            Text("归档不等于备份成功。同步状态以服务器确认为准。 ").font(.caption).foregroundStyle(LibraryPalette.muted)
         }
     }
 
@@ -1054,7 +1054,7 @@ struct CatalogInspectorView: View {
     /// away from controls in a narrow sheet. The control keeps its own AX label.
     private func inspectorField<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Text(title).font(.subheadline).foregroundStyle(LibraryPalette.muted)
                 .fixedSize(horizontal: false, vertical: true).accessibilityHidden(true)
             content()
         }
@@ -1073,7 +1073,7 @@ struct CatalogInspectorView: View {
 
     private func inspectorValue(_ title: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.subheadline).foregroundStyle(.secondary)
+            Text(title).font(.subheadline).foregroundStyle(LibraryPalette.muted)
             Text(value).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1090,7 +1090,7 @@ struct CatalogInspectorView: View {
                 else { requestLeave(.document(source)) }
             }.disabled(state == .checking)
             if state == .fileChanged || state == .unverifiedVersion { Text("保留摘录文字；请核对原文件的对应位置。 ").font(.caption).foregroundStyle(.orange) }
-        } else { Label(state.title, ink: "link.badge.plus").font(.caption).foregroundStyle(.secondary) }
+        } else { Label(state.title, ink: "link.badge.plus").font(.caption).foregroundStyle(LibraryPalette.muted) }
     }
 
     private var hasDraftChanges: Bool { form.isDirty }

@@ -1,9 +1,39 @@
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#elseif canImport(AppKit)
+import AppKit
+#endif
 
-/// Paper and ink from the library mark: warm ivory and burgundy line art.
+/// One paper-and-ink palette for iPhone and Mac. Night uses the same hues on a dark sheet
+/// so secondary text stays readable instead of turning into system gray on the wrong background.
 enum LibraryPalette {
-    static let ink = Color(red: 94 / 255, green: 34 / 255, blue: 55 / 255)
-    static let paper = Color(red: 232 / 255, green: 223 / 255, blue: 204 / 255)
+    static let ink = adaptive(light: (0x3F, 0x1A, 0x28), dark: (0xF6, 0xEE, 0xE8))
+    static let muted = adaptive(light: (0x5C, 0x32, 0x3E), dark: (0xCD, 0xB8, 0xBE))
+    static let paper = adaptive(light: (0xE8, 0xDF, 0xCC), dark: (0x24, 0x1C, 0x20))
+
+    private static func adaptive(light: (Int, Int, Int), dark: (Int, Int, Int)) -> Color {
+        #if canImport(UIKit)
+        Color(uiColor: UIColor { traits in
+            rgb(traits.userInterfaceStyle == .dark ? dark : light)
+        })
+        #else
+        Color(nsColor: NSColor(name: nil, dynamicProvider: { appearance in
+            let night = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return rgb(night ? dark : light)
+        }))
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private static func rgb(_ value: (Int, Int, Int)) -> UIColor {
+        UIColor(red: CGFloat(value.0) / 255, green: CGFloat(value.1) / 255, blue: CGFloat(value.2) / 255, alpha: 1)
+    }
+    #else
+    private static func rgb(_ value: (Int, Int, Int)) -> NSColor {
+        NSColor(srgbRed: CGFloat(value.0) / 255, green: CGFloat(value.1) / 255, blue: CGFloat(value.2) / 255, alpha: 1)
+    }
+    #endif
 }
 
 /// Line icon in the same stroke as the toucan mark. `name` accepts the existing symbol names.

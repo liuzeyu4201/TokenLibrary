@@ -113,7 +113,7 @@ extension DocumentStore {
                 var updated = current
                 if merged != current.markdown {
                     updated.markdown = merged
-                    _ = try saveDocument(updated, enqueue: true, expectedGeneration: current.localGeneration, db: db)
+                    _ = try saveDocument(updated, enqueue: true, expectedGeneration: current.localGeneration, db: db, index: false)
                     updated = try Row.fetchOne(db, sql: "SELECT * FROM working_documents WHERE id=?", arguments: [id]).map(mapDoc) ?? updated
                 }
                 try db.execute(sql: "DELETE FROM editor_drafts WHERE id=?", arguments: [draftID])

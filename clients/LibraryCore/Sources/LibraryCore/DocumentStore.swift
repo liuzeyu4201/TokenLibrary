@@ -246,7 +246,7 @@ public final class DocumentStore: @unchecked Sendable {
     }
 
     /// Read/merge/write callers can use the same transaction without a nested writer or TOCTOU gap.
-    func saveDocument(_ doc: LibraryDocument, enqueue: Bool, expectedGeneration: Int64?, db: Database) throws -> Bool {
+    func saveDocument(_ doc: LibraryDocument, enqueue: Bool, expectedGeneration: Int64?, db: Database, index: Bool = true) throws -> Bool {
         let existing = try Row.fetchOne(db, sql: "SELECT revision, parent_id, name, local_generation FROM working_documents WHERE id=?", arguments: [doc.id])
         if let expectedGeneration, (existing?["local_generation"] as Int64?) != expectedGeneration { return false }
         let prevRev: Int64 = existing?["revision"] ?? 0
@@ -302,8 +302,16 @@ public final class DocumentStore: @unchecked Sendable {
                 )
             }
         }
-        try reindex(doc, db: db)
+        if index { try reindex(doc, db: db) }
         return true
+    }
+
+    /// Rebuilds search text for one document. Editor keystrokes skip this until typing pauses.
+    public func refreshSearchIndex(id: String) throws {
+        try db.write { db in
+            guard let document = try Row.fetchOne(db, sql: "SELECT * FROM working_documents WHERE id=?", arguments: [id]).map(mapDoc) else { return }
+            try reindex(document, db: db)
+        }
     }
 
     /// Rename without touching markdown/PDF body. Empty input falls back via FileNames.

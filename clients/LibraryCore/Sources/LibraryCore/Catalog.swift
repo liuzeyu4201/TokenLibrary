@@ -98,6 +98,8 @@ public struct CatalogMetadata: Codable, Equatable, Sendable {
     public var abstract: String = ""
     public var topicIDs: [String] = []
     public var tags: [String] = []
+    /// Empty means the shelf uses the default paper and ink. A `#RRGGBB` value is the item's own color.
+    public var shelfColor: String = ""
     public var inbox = false
     public var archived = false
     public var archivedAt: Date?
@@ -118,7 +120,7 @@ public struct CatalogMetadata: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case version, category, title, authors, year, isbn, doi, publication, sourceURL, abstract
-        case topicIDs, tags, inbox, archived, archivedAt, readingStatus, readingPositions
+        case topicIDs, tags, shelfColor, inbox, archived, archivedAt, readingStatus, readingPositions
         case sourceIDs, relatedIDs, excerpts, originalFilename, originalFileHash, importedAt
     }
 
@@ -136,6 +138,7 @@ public struct CatalogMetadata: Codable, Equatable, Sendable {
         abstract = (try? c.decode(String.self, forKey: .abstract)) ?? ""
         topicIDs = (try? c.decode([String].self, forKey: .topicIDs)) ?? []
         tags = (try? c.decode([String].self, forKey: .tags)) ?? []
+        shelfColor = Self.normalizedShelfColor((try? c.decode(String.self, forKey: .shelfColor)) ?? "")
         inbox = (try? c.decode(Bool.self, forKey: .inbox)) ?? false
         archived = (try? c.decode(Bool.self, forKey: .archived)) ?? false
         archivedAt = try? c.decode(Date.self, forKey: .archivedAt)
@@ -147,6 +150,15 @@ public struct CatalogMetadata: Codable, Equatable, Sendable {
         originalFilename = (try? c.decode(String.self, forKey: .originalFilename)) ?? ""
         originalFileHash = try? c.decode(String.self, forKey: .originalFileHash)
         importedAt = try? c.decode(Date.self, forKey: .importedAt)
+    }
+
+    /// Accepts only `#RRGGBB`. Anything else, including a missing field, is the default shelf color.
+    public static func normalizedShelfColor(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count == 7, trimmed.hasPrefix("#") else { return "" }
+        let digits = trimmed.dropFirst()
+        guard digits.allSatisfy(\.isHexDigit) else { return "" }
+        return "#" + digits.uppercased()
     }
 
     public static func decode(_ json: String, kind: DocKind) -> CatalogMetadata {
@@ -467,6 +479,30 @@ public extension DocumentStore {
     @discardableResult
     func updateCatalog(id: String, mutate: (inout CatalogMetadata) throws -> Void) throws -> LibraryDocument {
         try db.write { db in try updateCatalog(id: id, db: db, mutate: mutate) }
+    }
+
+    /// Sets the shelf color for a file or an ordinary folder. An empty hex clears it.
+    /// The change is queued like any other metadata edit, so Mac and iPhone receive it.
+    @discardableResult
+    func setShelfColor(id: String, hex: String) throws -> LibraryDocument {
+        let trimmed = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        let color = CatalogMetadata.normalizedShelfColor(trimmed)
+        guard trimmed.isEmpty || !color.isEmpty else { throw CatalogError.invalidMetadata }
+        return try db.write { db in
+            guard var doc = try Row.fetchOne(db, sql: "SELECT * FROM working_documents WHERE id=? AND state='active'", arguments: [id]).map(mapDoc) else {
+                throw CatalogError.notFound
+            }
+            var metadata = doc.catalog
+            guard metadata.shelfColor != color else { return doc }
+            let before = metadata
+            metadata.shelfColor = color
+            doc.metadataJSON = try metadata.jsonChanges(from: before, preserving: doc.metadataJSON)
+            _ = try saveDocument(doc, enqueue: true, expectedGeneration: nil, db: db, index: false)
+            guard let saved = try Row.fetchOne(db, sql: "SELECT * FROM working_documents WHERE id=?", arguments: [id]).map(mapDoc) else {
+                throw CatalogError.notFound
+            }
+            return saved
+        }
     }
 
     @discardableResult

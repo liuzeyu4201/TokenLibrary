@@ -3,6 +3,8 @@ import Combine
 import LibraryCore
 #if os(iOS)
 import UIKit
+#elseif os(macOS)
+import AppKit
 #endif
 import PDFKit
 import WebKit
@@ -242,6 +244,36 @@ final class AppModel: ObservableObject {
     }
 
     func catalogChanged() { reload(); requestSync() }
+
+    func setShelfColor(_ document: LibraryDocument, _ hex: String) {
+        do {
+            _ = try store.setShelfColor(id: document.id, hex: hex)
+            catalogChanged()
+        } catch {
+            reportLocal("设置颜色", error: error)
+        }
+    }
+
+    /// Typing saves to SQLite immediately. Refreshing the shelf and starting a
+    /// sync wait until the keystrokes pause, so each character does not rebuild
+    /// the whole library on the main thread.
+    private var editorSyncTask: Task<Void, Never>?
+    func noteEditorAutosave() {
+        editorSyncTask?.cancel()
+        let editedStore = store
+        let editedID = selectedId
+        editorSyncTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            if let editedID {
+                await Task.detached(priority: .utility) {
+                    try? editedStore.refreshSearchIndex(id: editedID)
+                }.value
+            }
+            guard !Task.isCancelled else { return }
+            if client == nil || isLocalWorkspace { reload() } else { requestSync() }
+        }
+    }
     func openDocument(_ document: LibraryDocument) {
         catalogPresented = false
         selectedPage = nil;pdfNavigationRequest=nil
@@ -1101,6 +1133,130 @@ public struct TokenLibraryRoot: View {
     }
 }
 
+#if os(macOS)
+/// The Mac navigation bar drags the window, and a double-click there zooms it.
+/// Traffic lights, menus, and the search field still receive their own clicks.
+private struct MacTitlebarGestures: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView { HookView() }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? HookView)?.install()
+    }
+    static func dismantleNSView(_ nsView: NSView, coordinator: ()) {
+        (nsView as? HookView)?.removeMonitor()
+    }
+
+    final class HookView: NSView {
+        private var monitor: Any?
+        private var armed: NSEvent?
+        private var dragging = false
+        private weak var tracked: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            install()
+        }
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            super.viewWillMove(toWindow: newWindow)
+            if newWindow == nil { removeMonitor() }
+        }
+        func install() {
+            guard let window else { return }
+            if tracked === window, monitor != nil { return }
+            removeMonitor()
+            tracked = window
+            monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+                self?.handle(event) ?? event
+            }
+        }
+        func removeMonitor() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            armed = nil
+            dragging = false
+            tracked = nil
+        }
+        private func handle(_ event: NSEvent) -> NSEvent? {
+            guard let window = tracked, event.window === window else { return event }
+            switch event.type {
+            case .leftMouseDown:
+                let point = event.locationInWindow
+                guard point.x.isFinite, point.y.isFinite else { return event }
+                guard Self.inBar(point, window: window), !Self.passes(Self.hit(point, window: window), window: window, point: point) else {
+                    armed = nil
+                    dragging = false
+                    return event
+                }
+                if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
+                if event.clickCount >= 2 {
+                    armed = nil
+                    window.zoom(nil)
+                    return nil
+                }
+                armed = event
+                return nil
+            case .leftMouseDragged:
+                if dragging { return nil }
+                guard let start = armed else { return event }
+                let moved = hypot(event.locationInWindow.x - start.locationInWindow.x, event.locationInWindow.y - start.locationInWindow.y)
+                guard moved > 3 else { return nil }
+                armed = nil
+                dragging = true
+                window.performDrag(with: start)
+                return nil
+            case .leftMouseUp:
+                if dragging || armed != nil {
+                    dragging = false
+                    armed = nil
+                    return event.window === window ? nil : event
+                }
+                return event
+            default:
+                return event
+            }
+        }
+        private static func inBar(_ point: NSPoint, window: NSWindow) -> Bool {
+            guard let theme = window.contentView?.superview else { return false }
+            let split = window.contentLayoutRect.maxY
+            let top = theme.bounds.height
+            let band = top - split
+            if band > 12, band < 240, point.y >= split - 1, point.y <= top + 2,
+               point.x >= -1, point.x <= theme.bounds.width + 1 {
+                return true
+            }
+            guard let container = window.standardWindowButton(.closeButton)?.superview else { return false }
+            let frame = container.convert(container.bounds, to: nil)
+            guard frame.width > theme.bounds.width * 0.5, frame.height > 12, frame.height < 240 else { return false }
+            return frame.insetBy(dx: -1, dy: -1).contains(point)
+        }
+        private static func hit(_ point: NSPoint, window: NSWindow) -> NSView? {
+            window.contentView?.superview?.hitTest(point)
+        }
+        /// Toolbar buttons and the search field keep the click. The title text does not.
+        private static func passes(_ view: NSView?, window: NSWindow, point: NSPoint) -> Bool {
+            for kind: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let button = window.standardWindowButton(kind), !button.isHidden else { continue }
+                let frame = button.convert(button.bounds, to: nil).insetBy(dx: -3, dy: -3)
+                if frame.contains(point) { return true }
+            }
+            var current = view
+            var steps = 0
+            while let candidate = current, steps < 12 {
+                steps += 1
+                let name = NSStringFromClass(type(of: candidate))
+                if name.contains("ToolbarItemHostingView") || name.contains("SearchField") { return true }
+                if candidate is NSButton || candidate is NSSegmentedControl || candidate is NSPopUpButton || candidate is NSSearchField {
+                    return true
+                }
+                if let field = candidate as? NSTextField, field.isEditable { return true }
+                if name.contains("TitleView") || name.contains("Titlebar") { return false }
+                current = candidate.superview
+            }
+            return false
+        }
+    }
+}
+#endif
+
 private struct LibrarySessionView:View {
     @ObservedObject var model:AppModel
     var body:some View {
@@ -1111,6 +1267,10 @@ private struct LibrarySessionView:View {
         .tint(LibraryPalette.ink)
         .background(LibraryPalette.paper)
         .preferredColorScheme(model.colorScheme)
+        .toolbarColorScheme(model.colorScheme == .dark ? .dark : model.colorScheme == .light ? .light : nil, for: .automatic)
+        #if os(macOS)
+        .background(MacTitlebarGestures())
+        #endif
     }
 }
 
@@ -1124,7 +1284,7 @@ struct LoginView: View {
                 .frame(maxWidth: 280)
                 .accessibilityLabel("TokenLibrary")
             Text("TokenLibrary").font(.largeTitle.bold())
-            Text("个人资料库，Mac 和 iPhone 用同一个账号").foregroundStyle(.secondary)
+            Text("个人资料库，Mac 和 iPhone 用同一个账号").foregroundStyle(LibraryPalette.muted)
             TextField("服务器地址，例如 https://library.example.com", text: $model.server)
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled().disabled(model.connectionBusy)
@@ -1149,16 +1309,16 @@ struct LoginView: View {
             Button("只在这台设备上使用") { model.useOffline() }
                 .buttonStyle(InkButtonStyle())
             Text("登录后，Mac 和 iPhone 会同步同一份资料库。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(LibraryPalette.muted)
             if model.isLocalWorkspace && model.documents.contains(where: { $0.state == "active" && $0.kind != .folder }) {
                 Text("这台设备上已有资料。登录后进入已同步的资料库；原来的仍可从「只在这台设备上使用」打开，也可在设置里复制过去。")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(LibraryPalette.muted)
             }
             Text("测试连接不会发送密码。")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("不提供注册").font(.footnote).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(LibraryPalette.muted)
+            Text("不提供注册").font(.footnote).foregroundStyle(LibraryPalette.muted)
             if !model.banner.isEmpty {
-                Text(model.banner).foregroundStyle(.secondary).font(.footnote)
+                Text(model.banner).foregroundStyle(LibraryPalette.muted).font(.footnote)
             }
             if let error = model.connectionError {
                 Text(error).foregroundStyle(.red).font(.footnote).textSelection(.enabled)
@@ -1175,7 +1335,7 @@ private struct CredentialWaitingNotice: View {
         if let notice = model.credentialNotice {
             HStack(alignment: .top) {
                 ProgressView().controlSize(.small)
-                Text(notice).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                Text(notice).foregroundStyle(LibraryPalette.muted).frame(maxWidth: .infinity, alignment: .leading)
                 Button("停止等待") { model.cancelConnection() }
             }
             .font(.caption)
@@ -1246,6 +1406,11 @@ struct LibraryView: View {
     @State private var importPicker = LibraryImportPickerState()
     @State private var shownFolders = 24
     @State private var shownBooks = 48
+    @State private var openingNote: LibraryDocument?
+    @State private var openingBook: LibraryDocument?
+    @State private var folderFrames: [String: CGRect] = [:]
+    @State private var openGeneration = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var markdownFolder:URL?
     @State private var folderCandidates:[URL]=[]
     @State private var folderAccessing=false
@@ -1281,7 +1446,7 @@ struct LibraryView: View {
                     }
                     if !shelfFolders.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("文件夹").font(.caption).foregroundStyle(.secondary)
+                            Text("文件夹").font(.caption).foregroundStyle(LibraryPalette.muted)
                             LazyVGrid(columns: foldColumns, spacing: 28) {
                                 ForEach(shelfFolders.prefix(shownFolders), id: \.id) { foldedFolder($0) }
                             }
@@ -1296,7 +1461,7 @@ struct LibraryView: View {
                     }
                     if !unresolvedRows.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("待恢复位置").font(.caption).foregroundStyle(.secondary)
+                            Text("待恢复位置").font(.caption).foregroundStyle(LibraryPalette.muted)
                             LazyVGrid(columns: bookColumns, spacing: 22) {
                                 ForEach(unresolvedRows.prefix(shownBooks), id: \.id) { bookCard($0) }
                             }
@@ -1321,7 +1486,7 @@ struct LibraryView: View {
                             ProgressView()
                             Text("正在同步目录…").font(.headline)
                             Text("书会随着目录出现。PDF 和图片要等打开某一本再下载。")
-                                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                                .font(.callout).foregroundStyle(LibraryPalette.muted).multilineTextAlignment(.center)
                         }.padding(24)
                     } else if model.searching { ProgressView("正在搜索…") }
                     else {
@@ -1394,29 +1559,39 @@ struct LibraryView: View {
                     }
                 }
             }
-            .scaleEffect(openDocument == nil ? 1 : 0.975)
+            .scaleEffect(openDocument == nil ? 1 : 0.94)
+            .offset(x: openDocument == nil ? 0 : -36)
             .opacity(openDocument == nil ? 1 : 0)
             .allowsHitTesting(openDocument == nil)
             .accessibilityHidden(openDocument != nil)
             if let document = openDocument {
               readingSurface(document)
-                .transition(.asymmetric(
-                  insertion: .move(edge: .trailing).combined(with: .opacity),
-                  removal: .move(edge: .trailing).combined(with: .opacity)
-                ))
+                .transition(.asymmetric(insertion: .pageOpen, removal: .pageClose))
                 .zIndex(1)
             }
+            if let note = openingNote {
+              NoteOpenCover(title: note.name, origin: folderFrames[note.id] ?? .zero)
+                .zIndex(2)
+            }
+            if let book = openingBook {
+              BookOpenCover(title: book.name, kind: book.kind == .pdf ? "PDF" : "笔记")
+                .zIndex(2)
+            }
           }
+          .coordinateSpace(name: "shelfSpace")
+          .onPreferenceChange(FolderFrameKey.self) { folderFrames = $0 }
+          .overlay(alignment: .top) { SyncRibbon(active: model.syncing && !model.isLocalWorkspace) }
           .animation(shelfAnimation, value: openDocument?.id)
+          .animation(shelfAnimation, value: model.syncing)
           .background(LibraryPalette.paper)
         }
         if libraryNoticeVisible {
             VStack(alignment: .leading, spacing: 6) {
                 if !model.unresolvedDocuments.isEmpty {
                     Text("\(model.unresolvedDocuments.count) 项旧资料的目录位置待恢复。可在根目录查看和导出，原内容和未提交操作已保留。")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LibraryPalette.muted)
                 }
-                if !model.query.isEmpty,let coverage=model.searchCoverage { Text(coverage.summary).foregroundStyle(.secondary).accessibilityLabel(coverage.summary) }
+                if !model.query.isEmpty,let coverage=model.searchCoverage { Text(coverage.summary).foregroundStyle(LibraryPalette.muted).accessibilityLabel(coverage.summary) }
                 if let error = model.localOperationError {
                     HStack(alignment:.top) {
                         Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
@@ -1476,7 +1651,7 @@ struct LibraryView: View {
             NavigationStack {
                 List {
                     Text("选择一篇笔记。笔记引用的图片和音频会一并复制，原文件保持原样。")
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(LibraryPalette.muted)
                     ForEach(folderCandidates,id:\.self) { file in
                         Button {
                             if folderImportRequest?.isCurrent(store:model.store,parentID:model.currentFolder) == true {
@@ -1530,7 +1705,7 @@ struct LibraryView: View {
                 VStack(spacing: 12) {
                     if let message = model.openDownloadError {
                         Text("这一本没有下载下来。").font(.headline)
-                        Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Text(message).font(.callout).foregroundStyle(LibraryPalette.muted).multilineTextAlignment(.center)
                         Button("重试") { Task { await model.materializeOpenedDocument(document.id) } }
                             .buttonStyle(InkButtonStyle())
                     } else {
@@ -1636,7 +1811,7 @@ struct LibraryView: View {
             }
         }
         .font(.subheadline)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(LibraryPalette.muted)
     }
 
     @ViewBuilder
@@ -1658,7 +1833,7 @@ struct LibraryView: View {
 
     private func foldedFolder(_ doc: LibraryDocument) -> some View {
         Button {
-            withAnimation(shelfAnimation) { _ = model.openFolder(doc) }
+            openFolderAnimated(doc)
         } label: {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1668,11 +1843,12 @@ struct LibraryView: View {
                 VStack(spacing: 0) {
                     Text(doc.name)
                         .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(LibraryPalette.ink)
                         .lineLimit(1)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .background(LibraryPalette.ink.opacity(0.06))
+                        .background(folderTabColor(doc))
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous))
                         .overlay(alignment: .bottom) { Rectangle().fill(LibraryPalette.ink.opacity(0.22)).frame(height: 1) }
                     ZStack(alignment: .bottomLeading) {
@@ -1680,8 +1856,8 @@ struct LibraryView: View {
                             .fill(LibraryPalette.paper)
                             .overlay(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0, style: .continuous).stroke(LibraryPalette.ink.opacity(0.16), lineWidth: 1))
                         Text("展开")
-                            .font(.caption2)
-                            .foregroundStyle(LibraryPalette.ink.opacity(0.55))
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(LibraryPalette.muted)
                             .padding(12)
                     }
                     .frame(height: 78)
@@ -1699,6 +1875,12 @@ struct LibraryView: View {
             .padding(.bottom, 18)
         }
         .buttonStyle(.plain)
+        .opacity(openingNote?.id == doc.id ? 0 : 1)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(key: FolderFrameKey.self, value: [doc.id: proxy.frame(in: .named("shelfSpace"))])
+            }
+        }
         .contextMenu { docMenu(doc) }
         .dropDestination(for: String.self) { ids, _ in model.drop(ids, onto: doc) }
         .accessibilityLabel(doc.name)
@@ -1714,12 +1896,10 @@ struct LibraryView: View {
     private func bookCard(_ doc: LibraryDocument) -> some View {
         let excerpt = model.query.isEmpty ? nil : model.searchResults.first(where: { $0.objectId == doc.id })?.excerpt
         return Button {
-            withAnimation(shelfAnimation) {
-                if !model.activateSelectedPDFSearchResult(doc.id) { model.selectLibraryRow(doc.id) }
-            }
+            openBookAnimated(doc)
         } label: {
             HStack(spacing: 0) {
-                Rectangle().fill(LibraryPalette.ink).frame(width: 14)
+                Rectangle().fill(shelfTint(doc.catalog.shelfColor) ?? LibraryPalette.ink).frame(width: 14)
                 VStack(alignment: .leading, spacing: 8) {
                     Text(doc.name)
                         .font(.system(.headline, design: .serif))
@@ -1728,11 +1908,11 @@ struct LibraryView: View {
                         .multilineTextAlignment(.leading)
                     Spacer(minLength: 0)
                     if let excerpt {
-                        Text(excerpt).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                        Text(excerpt).font(.caption2).foregroundStyle(LibraryPalette.muted).lineLimit(2)
                     }
                     Text(bookAvailability(doc))
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(LibraryPalette.ink.opacity(0.7))
+                        .foregroundStyle(LibraryPalette.muted)
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -1752,13 +1932,221 @@ struct LibraryView: View {
         .accessibilityHint(doc.kind == .pdf ? "打开这本 PDF" : "打开这本笔记")
     }
 
+    private func openFolderAnimated(_ doc: LibraryDocument) {
+        guard !reduceMotion else {
+            withAnimation(shelfAnimation) { _ = model.openFolder(doc) }
+            return
+        }
+        openGeneration += 1
+        let generation = openGeneration
+        openingBook = nil
+        openingNote = doc
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(980))
+            guard generation == openGeneration else { return }
+            withAnimation(shelfAnimation) { _ = model.openFolder(doc) }
+            try? await Task.sleep(for: .milliseconds(160))
+            guard generation == openGeneration else { return }
+            openingNote = nil
+        }
+    }
+
+    private func openBookAnimated(_ doc: LibraryDocument) {
+        guard !reduceMotion else {
+            withAnimation(shelfAnimation) {
+                if !model.activateSelectedPDFSearchResult(doc.id) { model.selectLibraryRow(doc.id) }
+            }
+            return
+        }
+        openGeneration += 1
+        let generation = openGeneration
+        openingNote = nil
+        openingBook = doc
+        withAnimation(shelfAnimation) {
+            if !model.activateSelectedPDFSearchResult(doc.id) { model.selectLibraryRow(doc.id) }
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(680))
+            guard generation == openGeneration else { return }
+            openingBook = nil
+        }
+    }
+
+    private func folderTabColor(_ doc: LibraryDocument) -> Color {
+        guard let tint = shelfTint(doc.catalog.shelfColor) else { return LibraryPalette.ink.opacity(0.06) }
+        return tint.opacity(0.34)
+    }
+
     @ViewBuilder
     func docMenu(_ doc: LibraryDocument) -> some View {
         Button("重命名") { model.beginRename(doc) }
+        Menu("颜色") {
+            ForEach(ShelfSwatch.all, id: \.hex) { swatch in
+                Button(doc.catalog.shelfColor == CatalogMetadata.normalizedShelfColor(swatch.hex) ? "✓ \(swatch.title)" : swatch.title) {
+                    model.setShelfColor(doc, swatch.hex)
+                }
+            }
+        }
         Button("移动到…") { model.moveTarget=doc }
         if doc.kind == .md { Button("导出 Markdown 与附件") { model.prepareExport(doc) } }
         if doc.kind == .pdf { Button("导出含批注 PDF") { model.prepareExport(doc) } }
         Button("删除", role: .destructive) { model.delete(doc) }
+    }
+}
+
+private struct ShelfSwatch {
+    let hex: String
+    let title: String
+    static let all: [ShelfSwatch] = [
+        .init(hex: "", title: "默认"),
+        .init(hex: "#8C3A4A", title: "绛红"),
+        .init(hex: "#A65D3F", title: "赭石"),
+        .init(hex: "#3E6B4F", title: "松绿"),
+        .init(hex: "#3A5F8C", title: "海蓝"),
+        .init(hex: "#8A6A32", title: "麦金"),
+        .init(hex: "#6B4C7A", title: "暮紫"),
+    ]
+}
+
+private func shelfTint(_ hex: String) -> Color? {
+    let normalized = CatalogMetadata.normalizedShelfColor(hex)
+    guard normalized.count == 7, let value = UInt32(normalized.dropFirst(), radix: 16) else { return nil }
+    return Color(
+        red: Double((value >> 16) & 0xff) / 255,
+        green: Double((value >> 8) & 0xff) / 255,
+        blue: Double(value & 0xff) / 255
+    )
+}
+
+private struct PageTurn: ViewModifier, @MainActor Animatable {
+    var amount: Double
+    var animatableData: Double {
+        get { amount }
+        set { amount = newValue }
+    }
+    func body(content: Content) -> some View {
+        content
+            .rotation3DEffect(.degrees(amount * 86), axis: (x: 0, y: 1, z: 0), anchor: .leading, perspective: 0.55)
+            .opacity(1 - amount * 0.2)
+    }
+}
+
+private extension AnyTransition {
+    static var pageOpen: AnyTransition { .modifier(active: PageTurn(amount: 1), identity: PageTurn(amount: 0)) }
+    static var pageClose: AnyTransition { .modifier(active: PageTurn(amount: 1), identity: PageTurn(amount: 0)) }
+}
+
+private struct FolderFrameKey: PreferenceKey {
+    static let defaultValue: [String: CGRect] = [:]
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
+    }
+}
+
+private struct NoteOpenCover: View {
+    let title: String
+    let origin: CGRect
+    @State private var traveled = false
+    var body: some View {
+        GeometryReader { geo in
+            let width = traveled ? min(420, geo.size.width * 0.52) : max(origin.width, 1)
+            let flap: Double = traveled ? 0 : 34
+            VStack(spacing: 0) {
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(LibraryPalette.ink)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(LibraryPalette.ink.opacity(0.06))
+                ZStack(alignment: .bottomLeading) {
+                    UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0, style: .continuous)
+                        .fill(LibraryPalette.paper)
+                        .overlay(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0, style: .continuous).stroke(LibraryPalette.ink.opacity(0.16), lineWidth: 1))
+                    Text("展开")
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(LibraryPalette.muted)
+                        .padding(12)
+                        .opacity(traveled ? 0 : 1)
+                }
+                .frame(height: traveled ? 170 : 78)
+                .rotation3DEffect(.degrees(flap), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.5)
+            }
+            .background(alignment: .top) {
+                UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous)
+                    .fill(LibraryPalette.paper)
+                    .frame(height: 42)
+                    .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous).stroke(LibraryPalette.ink.opacity(0.2), lineWidth: 1))
+            }
+            .frame(width: width)
+            .shadow(color: LibraryPalette.ink.opacity(traveled ? 0.22 : 0.12), radius: traveled ? 18 : 8, y: traveled ? 14 : 10)
+            .position(x: traveled || origin == .zero ? geo.size.width / 2 : origin.midX,
+                      y: traveled || origin == .zero ? geo.size.height / 2 : origin.midY)
+        }
+        .background(LibraryPalette.ink.opacity(traveled ? 0.08 : 0).ignoresSafeArea())
+        .allowsHitTesting(true)
+        .onAppear {
+            withAnimation(.spring(response: 0.92, dampingFraction: 0.9)) { traveled = true }
+        }
+        .accessibilityLabel("正在打开 \(title)")
+    }
+}
+
+private struct BookOpenCover: View {
+    let title: String
+    let kind: String
+    @State private var turned = false
+    var body: some View {
+        ZStack {
+            LibraryPalette.ink.opacity(turned ? 0 : 0.08).ignoresSafeArea()
+            HStack(spacing: 0) {
+                Rectangle().fill(LibraryPalette.ink).frame(width: 16)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(title)
+                        .font(.system(.title2, design: .serif))
+                        .foregroundStyle(LibraryPalette.ink)
+                        .lineLimit(4)
+                    Spacer(minLength: 0)
+                    Text(kind).font(.caption.weight(.semibold)).foregroundStyle(LibraryPalette.muted)
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(width: 230, height: 320)
+            .background(LibraryPalette.paper)
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .shadow(color: LibraryPalette.ink.opacity(0.22), radius: 16, y: 10)
+            .rotation3DEffect(.degrees(turned ? -102 : 0), axis: (x: 0, y: 1, z: 0), anchor: .leading, perspective: 0.5)
+        }
+        .allowsHitTesting(true)
+        .onAppear {
+            withAnimation(.spring(response: 0.68, dampingFraction: 0.84)) { turned = true }
+        }
+        .accessibilityLabel("正在打开 \(title)")
+    }
+}
+
+private struct SyncRibbon: View {
+    var active: Bool
+    var body: some View {
+        GeometryReader { geo in
+            let width = geo.size.width
+            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !active)) { context in
+                let cycle = 1.2
+                let travel = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: cycle) / cycle
+                Capsule()
+                    .fill(LibraryPalette.ink)
+                    .frame(width: max(56, width * 0.22), height: 2)
+                    .offset(x: -width * 0.22 + travel * (width * 1.22))
+                    .opacity(active ? 0.9 : 0)
+            }
+        }
+        .frame(height: 2)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(!active)
+        .accessibilityLabel("正在同步")
     }
 }
 
@@ -1802,7 +2190,7 @@ struct MoveDocumentView:View {
                     } label: {
                         VStack(alignment:.leading) {
                             Label(folder.name, ink: "folder")
-                            Text(model.folderBreadcrumb(folder)).font(.caption).foregroundStyle(.secondary)
+                            Text(model.folderBreadcrumb(folder)).font(.caption).foregroundStyle(LibraryPalette.muted)
                         }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(folder.id == document.parentId)
                 }
@@ -1845,7 +2233,7 @@ struct EditorScreen: View {
                     }.font(.callout).padding(12).background(.regularMaterial)
                   }
                   EditorWebView(docId:doc.id,markdown:doc.markdown,store:store,handle:editorHandle,readOnly:doc.catalog.archived,searchText:model.navigationSearch,
-                              onPersist:{ if $0 === model.store { model.catalogChanged() } },
+                              onPersist:{ if $0 === model.store { model.noteEditorAutosave() } },
                               onError:{ if store === model.store { model.reportLocal("保存笔记",message:$0) } },onOpenLink:model.openDocumentLink)
                 }
                 .navigationTitle(doc.catalogTitle)
@@ -1876,7 +2264,7 @@ struct EditorScreen: View {
                 #if canImport(UIKit)
                 .sheet(isPresented: $stickyPresented) {
                     NavigationStack {
-                        StickyNoteEditor(doc:doc,store:store,onPersist:{ if store === model.store { model.catalogChanged() } },
+                        StickyNoteEditor(doc:doc,store:store,onPersist:{ if store === model.store { model.noteEditorAutosave() } },
                                          onRename:{ model.rename(doc,to:$0) },onBeginRename:{ model.beginRename(doc) },onExport:{ model.prepareExport(doc) })
                         .toolbar { Button("完成") { stickyPresented=false } }
                     }
@@ -1993,7 +2381,7 @@ struct PDFReaderView: View {
                     Button("查看待核对批注") { annotationDocument=document;annotationsPresented=true }
                 }.font(.caption).padding(8)
             }
-            if !hint.isEmpty { Text(hint).font(.footnote).foregroundStyle(.secondary).padding(8) }
+            if !hint.isEmpty { Text(hint).font(.footnote).foregroundStyle(LibraryPalette.muted).padding(8) }
             PDFKitView(pdfDoc:$pdfDoc,handle:handle,initialPage:initialPage,onPageChange:pageChanged,onInstalled:installedPDF)
         }
     }
@@ -2015,7 +2403,7 @@ struct PDFReaderView: View {
                 .onSubmit(submitPageInput)
             Button("前往",action:submitPageInput)
                 .accessibilityLabel("前往输入页码")
-            Text("/ \(totalPages)").foregroundStyle(.secondary)
+            Text("/ \(totalPages)").foregroundStyle(LibraryPalette.muted)
             Button { goTo(pageNumber) } label: { InkGlyph(name: "chevron.right").frame(width: 16, height: 16) }
                 .disabled(pageNumber>=totalPages).accessibilityLabel("下一页")
         }.fixedSize(horizontal:true,vertical:false)
@@ -2090,12 +2478,12 @@ struct PDFReaderView: View {
                                 if targetNoteID.isEmpty { Text("新建阅读笔记") }
                                 else if let candidate=noteCandidates.first(where:{$0.id == targetNoteID}) {
                                     Text(candidate.title)
-                                    Text("文件："+candidate.filename).font(.caption).foregroundStyle(.secondary)
-                                    Text(candidate.folderPath).font(.caption).foregroundStyle(.secondary)
+                                    Text("文件："+candidate.filename).font(.caption).foregroundStyle(LibraryPalette.muted)
+                                    Text(candidate.folderPath).font(.caption).foregroundStyle(LibraryPalette.muted)
                                 } else { Text("原选择已不可用，请重新选择") }
                             }
                             Spacer()
-                            InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(.secondary)
+                            InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(LibraryPalette.muted)
                         }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("选择摘录笔记")
                 }
@@ -2259,7 +2647,7 @@ struct PDFAnnotationsView: View {
                     }
                     if item.needsPlacementReview(for:currentPDFBlobId) {
                         Text("文字已保留。请在当前原文中重新选择位置并添加批注，核对后可删除这条旧记录；导出不使用旧坐标。")
-                            .font(.caption).foregroundStyle(.secondary)
+                            .font(.caption).foregroundStyle(LibraryPalette.muted)
                     }
                     if !item.text.isEmpty { Text(item.text).textSelection(.enabled) }
                     HStack {
@@ -2330,7 +2718,7 @@ struct TrashView: View {
                 ScrollView {
                     LazyVStack(alignment:.leading,spacing:16) {
                         Text("删除的资料保留 30 天。还原到原目录；原目录不可用时回到资料库根目录，同名资料会添加数字后缀。")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(LibraryPalette.muted)
                         ForEach(trashedDocuments,id:\.id) { doc in
                             let expired=doc.purgeAt.map { $0 <= Date() } ?? false
                             HStack {
@@ -2338,7 +2726,7 @@ struct TrashView: View {
                                     Text(doc.name)
                                     if let deadline=doc.purgeAt {
                                         Text(expired ? "已到期，等待清理" : "保留至 \(deadline.formatted(date:.abbreviated,time:.shortened))")
-                                            .font(.caption).foregroundStyle(.secondary)
+                                            .font(.caption).foregroundStyle(LibraryPalette.muted)
                                     }
                                 }
                                 Spacer()
@@ -2369,48 +2757,68 @@ enum AppRelease {
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        Form {
-            Section("账号") {
-                Text("\(model.username) · 两端共用")
-                Text("无注册")
-                if model.session != nil {
-                    Button("退出登录") { model.logout() }
-                } else {
-                    Button("登录并同步") { model.showConnection() }
-                }
-            }
-            if !model.isLocalWorkspace && model.session != nil {
-                Section("这台设备上的资料") {
-                    Text("复制到已同步的资料库，这台设备上的原件保留。再复制一次会多一份。")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Button("复制到已同步的资料库") { model.copyLocalDocumentsToConnectedLibrary() }.disabled(model.syncing)
-                }
-            }
-            Section("风格") {
-                Picker("风格", selection: Binding(
-                    get: { model.appearance },
-                    set: { model.setAppearance($0) }
-                )) {
-                    ForEach(AppearanceStyle.allCases, id: \.self) { style in
-                        Text(style.rawValue).tag(style)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 28) {
+                settingsGroup("账号") {
+                    Text(model.username).font(.body.weight(.semibold)).foregroundStyle(LibraryPalette.ink)
+                    Text("两端共用这一个账号，不提供注册。").font(.callout).foregroundStyle(LibraryPalette.muted)
+                    if model.session != nil {
+                        Button("退出登录") { model.logout() }.buttonStyle(InkButtonStyle())
+                    } else {
+                        Button("登录并同步") { model.showConnection() }.buttonStyle(InkButtonStyle(prominent: true))
                     }
                 }
-                .pickerStyle(.segmented)
-            }
-            Section("版本") {
-                Text(AppRelease.display)
-            }
-            Section("连接与提交") {
-                Text(model.server.isEmpty ? "尚未配置服务器" : model.server)
-                Text("待提交 \(model.pendingCount) 项")
-                Text("资料先保存到本机；联网时自动同步。维护或连接失败时可继续编辑。")
-                    .font(.caption).foregroundStyle(.secondary)
-                if model.session != nil {
-                    Button(model.syncing ? "正在同步…" : "现在同步一次") { model.requestSync() }.disabled(model.syncing)
+                if !model.isLocalWorkspace && model.session != nil {
+                    settingsGroup("这台设备上的资料") {
+                        Text("复制到已同步的资料库，这台设备上的原件保留。再复制一次会多一份。")
+                            .font(.callout).foregroundStyle(LibraryPalette.muted)
+                        Button("复制到已同步的资料库") { model.copyLocalDocumentsToConnectedLibrary() }
+                            .buttonStyle(InkButtonStyle())
+                            .disabled(model.syncing)
+                    }
+                }
+                settingsGroup("风格") {
+                    Picker("风格", selection: Binding(
+                        get: { model.appearance },
+                        set: { model.setAppearance($0) }
+                    )) {
+                        ForEach(AppearanceStyle.allCases, id: \.self) { style in
+                            Text(style.rawValue).tag(style)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                settingsGroup("版本") {
+                    Text(AppRelease.display).font(.body.monospacedDigit()).foregroundStyle(LibraryPalette.ink)
+                }
+                settingsGroup("连接与提交") {
+                    Text(model.server.isEmpty ? "尚未配置服务器" : model.server)
+                        .font(.body).foregroundStyle(LibraryPalette.ink).textSelection(.enabled)
+                    Text("待提交 \(model.pendingCount) 项").foregroundStyle(LibraryPalette.muted)
+                    Text("资料先保存到本机；联网时自动同步。维护或连接失败时可继续编辑。")
+                        .font(.callout).foregroundStyle(LibraryPalette.muted)
+                    if model.session != nil {
+                        Button(model.syncing ? "正在同步…" : "现在同步一次") { model.requestSync() }
+                            .buttonStyle(InkButtonStyle())
+                            .disabled(model.syncing)
+                    }
                 }
             }
+            .padding(24)
+            .frame(maxWidth: 520, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .background(LibraryPalette.paper)
         .navigationTitle("设置")
+    }
+
+    private func settingsGroup<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.headline).foregroundStyle(LibraryPalette.ink)
+            content()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

@@ -95,15 +95,22 @@ enum EditorLoadFailure: Equatable {
         if session == nil { session=try store.beginMarkdownEdit(id:documentID) }
         return document.markdown
     }
+    func editingSession() throws -> MarkdownEditSession {
+        if session == nil { session=try store.beginMarkdownEdit(id:documentID) }
+        guard let session else { throw EditorEditError.unavailableDocument }
+        return session
+    }
+    func clearPendingEdit() { pendingEdit=nil }
+    func rememberFailedEdit(base:String,proposed:String) {
+        pendingEdit=PendingEdit(base:base,proposed:proposed)
+    }
     func save(base:String,proposed:String) throws -> MarkdownEditSaveResult {
         do {
-            if session == nil { session=try store.beginMarkdownEdit(id:documentID) }
-            guard let session else { throw EditorEditError.unavailableDocument }
-            let result=try session.save(baseMarkdown:base,proposedMarkdown:proposed)
-            if pendingEdit != nil { pendingEdit=nil }
+            let result=try editingSession().save(baseMarkdown:base,proposedMarkdown:proposed)
+            clearPendingEdit()
             return result
         } catch {
-            pendingEdit=PendingEdit(base:base,proposed:proposed)
+            rememberFailedEdit(base:base,proposed:proposed)
             throw error
         }
     }
@@ -155,7 +162,7 @@ struct EditorWebView: View {
                     VStack(spacing:12) {
                         ProgressView()
                         Text("正在打开笔记…").font(.headline)
-                        Text("正在准备本机编辑器与已保存内容。").font(.callout).foregroundStyle(.secondary)
+                        Text("正在准备本机编辑器与已保存内容。").font(.callout).foregroundStyle(LibraryPalette.muted)
                     }.frame(maxWidth:.infinity,maxHeight:.infinity).background(.regularMaterial)
                         .accessibilityElement(children:.combine).accessibilityIdentifier("editor-loading")
                 case .failed(let message):
@@ -312,19 +319,28 @@ struct EditorWebContent: ViewRepresentable {
             guard let data=try? JSONSerialization.data(withJSONObject:value,options:[.fragmentsAllowed]) else { return "null" }
             return String(decoding:data,as:UTF8.self)
         }
-        @discardableResult private func save(base:String,proposed:String)->(Bool,String,String?,Bool) {
-            do {
-                switch try host.save(base:base,proposed:proposed) {
-                case .saved(let canonical,_):
-                    observedMarkdown=canonical;onPersist(store);return (true,canonical,nil,false)
-                case .conflict(let canonical,_):
-                    let message="另一处修改与当前输入重叠。你的内容已保存为恢复草稿，可在“冲突与恢复草稿”中处理。"
-                    onPersist(store);onError(message);return (false,canonical,message,true)
-                }
-            } catch {
+        private func finishSave(_ outcome:Result<MarkdownEditSaveResult,Error>,request:NSNumber,base:String,proposed:String) {
+            let delivered:(Bool,String,String?,Bool)
+            switch outcome {
+            case .success(.saved(let canonical,_)):
+                host.clearPendingEdit()
+                observedMarkdown=canonical
+                onPersist(store)
+                delivered=(true,canonical,nil,false)
+            case .success(.conflict(let canonical,_)):
+                host.clearPendingEdit()
+                let message="另一处修改与当前输入重叠。你的内容已保存为恢复草稿，可在“冲突与恢复草稿”中处理。"
+                onPersist(store);onError(message)
+                delivered=(false,canonical,message,true)
+            case .failure(let error):
+                host.rememberFailedEdit(base:base,proposed:proposed)
                 let message="保存笔记失败：\(error.localizedDescription)"
-                onError(message);return (false,observedMarkdown,message,false)
+                onError(message)
+                delivered=(false,observedMarkdown,message,false)
             }
+            guard !detached,ready,webView != nil else { return }
+            let arguments:[Any]=[request,delivered.0,delivered.1,delivered.2 as Any? ?? NSNull(),delivered.3]
+            webView?.evaluateJavaScript("window.tlSaveResult(...\(Self.json(arguments)))")
         }
         func flush(_ completion:@escaping(Bool)->Void) {
             guard let webView,ready else { completion(false);return }
@@ -388,9 +404,26 @@ struct EditorWebContent: ViewRepresentable {
             case "tlSave":
                 guard ready,let payload=message.body as? [String:Any],let request=payload["requestId"] as? NSNumber,
                       let base=payload["baseMarkdown"] as? String,let proposed=payload["proposedMarkdown"] as? String else { return }
-                let result=save(base:base,proposed:proposed)
-                let arguments:[Any]=[request,result.0,result.1,result.2 as Any? ?? NSNull(),result.3]
-                webView?.evaluateJavaScript("window.tlSaveResult(...\(Self.json(arguments)))")
+                let session: MarkdownEditSession
+                do { session=try host.editingSession() }
+                catch {
+                    finishSave(.failure(error),request:request,base:base,proposed:proposed)
+                    return
+                }
+                // The note body is written off the main thread. Holding delete used to
+                // freeze the window until that write, on the same thread that draws the caret.
+                Task { @MainActor in
+                    let outcome: Result<MarkdownEditSaveResult,Error>
+                    do {
+                        let saved=try await Task.detached(priority:.userInitiated) {
+                            try session.save(baseMarkdown:base,proposedMarkdown:proposed)
+                        }.value
+                        outcome = .success(saved)
+                    } catch {
+                        outcome = .failure(error)
+                    }
+                    finishSave(outcome,request:request,base:base,proposed:proposed)
+                }
             case "tlAttachment":
                 guard let values=message.body as? [String:String],let id=values["id"],let encoded=values["data"] else { return }
                 do {

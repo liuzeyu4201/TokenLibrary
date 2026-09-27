@@ -46,9 +46,11 @@ const showError = error => { errorBox.textContent = error?.message || String(err
 const clearError = () => { errorBox.hidden = true; errorBox.textContent = ''; };
 const notify = value => {
   markdown = value;
-  // Reassigning a textarea value during marked-text input can end the native
-  // input method's composition. Ordinary source input already has this value.
-  updateSourceValue(source,value);
+  // The hidden source box is only kept in sync while source mode is visible.
+  // Rewriting it on every rich-text keystroke diffs the whole note, and a
+  // deletion inside a paragraph makes that diff scan the paragraph character
+  // by character. Source mode already holds the typed value.
+  if (mode === 'source') updateSourceValue(source,value);
   presentStatus(sourceComposing ? '输入法正在组合文字…' : window.webkit ? '正在保存到本机…' : '浏览器预览 · 内容尚未写入资料库');
   sendSave();
   window.dispatchEvent(new CustomEvent('tl-change', {detail: value}));
@@ -67,7 +69,7 @@ window.tlSaveResult = (requestId, ok, canonical, message, durableConflict = fals
   // Capture the final rich transaction before an acknowledgement can replace it.
   if (mode === 'edit' && ready) {
     const current = crepe.getMarkdown();
-    if (current !== richMarkdown) { richMarkdown = current; markdown = current; updateSourceValue(source,current); }
+    if (current !== richMarkdown) { richMarkdown = current; markdown = current; }
   }
   window.tlSaved(ok, message, durableConflict);
   if (!ok) {

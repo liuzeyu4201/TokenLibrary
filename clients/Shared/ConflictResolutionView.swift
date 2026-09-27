@@ -16,7 +16,7 @@ struct ConflictResolutionView: View {
                         Button { selectedDraft=draft } label: {
                             VStack(alignment:.leading,spacing:6) {
                                 Text(draft.name)
-                                Text(draft.reason).font(.caption).foregroundStyle(.secondary)
+                                Text(draft.reason).font(.caption).foregroundStyle(LibraryPalette.muted)
                             }
                             .padding(.vertical,6)
                             .frame(maxWidth:.infinity,alignment:.leading)
@@ -31,7 +31,7 @@ struct ConflictResolutionView: View {
                         Button { selected=conflict } label: {
                             VStack(alignment:.leading,spacing:6) {
                                 Text(model.documents.first(where:{$0.id == conflict.objectId})?.catalogTitle ?? "需要处理的资料")
-                                Text("双方内容均已保留，比较后选择保留方式。").font(.caption).foregroundStyle(.secondary)
+                                Text("双方内容均已保留，比较后选择保留方式。").font(.caption).foregroundStyle(LibraryPalette.muted)
                             }
                             .padding(.vertical,6)
                             .frame(maxWidth:.infinity,alignment:.leading)
@@ -76,7 +76,7 @@ private struct EditorDraftDetailView:View {
         NavigationStack {
             ScrollView {
                 VStack(alignment:.leading,spacing:18) {
-                    Text(draft.reason).foregroundStyle(.secondary)
+                    Text(draft.reason).foregroundStyle(LibraryPalette.muted)
                     if draft.kind == .md {
                         Text("你的编辑草稿").font(.headline)
                         Text(draft.proposedMarkdown).font(.system(.body,design:.monospaced)).textSelection(.enabled)
@@ -87,7 +87,7 @@ private struct EditorDraftDetailView:View {
                             Text("第 \(annotation.pageIndex+1) 页 · \(annotation.text)").textSelection(.enabled)
                         }
                     }
-                    Text("恢复会新建副本，保留现有资料和回收站状态。PDF 批注只恢复到原文件版本。").font(.caption).foregroundStyle(.secondary)
+                    Text("恢复会新建副本，保留现有资料和回收站状态。PDF 批注只恢复到原文件版本。").font(.caption).foregroundStyle(LibraryPalette.muted)
                     if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                     HStack(spacing: 10) {
                         Button("恢复为新副本") {
@@ -127,7 +127,7 @@ private struct ConflictDetailView: View {
             ScrollView {
                 VStack(alignment:.leading,spacing:18) {
                     Text("比较两个版本后再保存。处理期间原内容与双方修改都会保留。")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(LibraryPalette.muted)
                     ViewThatFits(in:.horizontal) {
                         HStack(alignment:.top,spacing:12) {
                             snapshotView("本机",value:local).frame(minWidth:220)
@@ -149,7 +149,7 @@ private struct ConflictDetailView: View {
                         }
                     }
                     if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                    if model.client == nil { Text("请先重新连接服务器，再提交冲突处理结果。原内容仍保留在本机。").foregroundStyle(.secondary) }
+                    if model.client == nil { Text("请先重新连接服务器，再提交冲突处理结果。原内容仍保留在本机。").foregroundStyle(LibraryPalette.muted) }
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             Button("保留本机版本") { resolve(.local) }.buttonStyle(InkButtonStyle())
@@ -173,7 +173,7 @@ private struct ConflictDetailView: View {
         VStack(alignment:.leading,spacing:8) {
             Text("合并结果").font(.headline)
             Text("保存前可以改这段文字。未提交前不会标为已同步。")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(LibraryPalette.muted)
             TextEditor(text:$draft)
                 .font(.system(.body,design:.monospaced))
                 .frame(minHeight:220)

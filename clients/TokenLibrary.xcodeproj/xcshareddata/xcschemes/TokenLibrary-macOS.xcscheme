@@ -38,6 +38,23 @@
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
+      <PostActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Install the Mac app into Applications"
+               scriptText = "/bin/sh &quot;${SRCROOT}/scripts/install-mac-app.sh&quot;&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "0A100000000000000000000C"
+                     BuildableName = "TokenLibrary.app"
+                     ReferencedContainer = "container:TokenLibrary.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PostActions>
    </BuildAction>
    <TestAction
       buildConfiguration = "Debug"

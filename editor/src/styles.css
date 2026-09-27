@@ -1,4 +1,4 @@
-:root { color-scheme: light dark; --paper:#faf9f6; --ink:#272c30; --muted:#67716f; --line:#dde3df; --accent:#236854; --toolbar:#f3f5f1; }
+:root { color-scheme: light dark; --paper:#E8DFCC; --ink:#3F1A28; --muted:#5C323E; --line:#C9B7A8; --accent:#5E2237; --toolbar:#F3EBDD; }
 * { box-sizing:border-box; }
 [hidden] { display:none !important; }
 body { margin:0; background:var(--paper); color:var(--ink); font:16px/1.7 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; }
@@ -32,4 +32,4 @@ audio { width:min(100%,450px); }
 .milkdown .ProseMirror { padding:24px clamp(28px,5vw,64px) 80px; min-height:calc(100vh - 150px); font-family:inherit; }
 .milkdown .ProseMirror h1 { font-size:1.9em; line-height:1.35; }
 @media(max-width:540px) { .editor-toolbar {padding:8px;gap:4px;} button {min-height:42px;padding:6px 10px;} .milkdown .ProseMirror {padding:20px 28px 100px;} }
-@media(prefers-color-scheme:dark) { :root {--paper:#202624;--ink:#e6eae6;--muted:#a5b3aa;--line:#3e4c44;--accent:#91cdb2;--toolbar:#2c3731;} #error,.render-error {color:#ffd0b9;background:#442c24;} }
+@media(prefers-color-scheme:dark) { :root {--paper:#241C20;--ink:#F6EEE8;--muted:#CDB8BE;--line:#4A3C42;--accent:#E7C2CC;--toolbar:#31262B;} #error,.render-error {color:#F6EEE8;background:#4A3030;} }

@@ -22,6 +22,31 @@ final class CatalogTests: XCTestCase {
         return doc
     }
 
+    func testShelfColorAppliesToFoldersAndFilesAndClearsWithoutDroppingUnknownMetadata() throws {
+        let store = try makeStore()
+        let folder = LibraryDocument(id: UUID().uuidString.lowercased(), kind: .folder, parentId: "root", name: "备忘录",
+                                     markdown: "", pdfPath: nil, revision: 1, localGeneration: 0, state: "active", purgeAt: nil,
+                                     status: .savedLocal, annotationsJSON: "[]", metadataJSON: #"{"future":true}"#)
+        try store.saveDocument(folder, enqueue: false)
+        let note = try seed(store, name: "笔记.md", kind: .md, metadata: "{}")
+        let coloredFolder = try store.setShelfColor(id: folder.id, hex: "#3e6b4f")
+        let coloredNote = try store.setShelfColor(id: note.id, hex: "#8C3A4A")
+        XCTAssertEqual(coloredFolder.catalog.shelfColor, "#3E6B4F")
+        XCTAssertEqual(coloredFolder.name, "备忘录")
+        XCTAssertEqual(coloredNote.catalog.shelfColor, "#8C3A4A")
+        let raw = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(coloredFolder.metadataJSON.utf8)) as? [String: Any])
+        XCTAssertEqual(raw["future"] as? Bool, true)
+        XCTAssertEqual(raw["shelfColor"] as? String, "#3E6B4F")
+        let queued = try store.pending().filter { $0.objectId == folder.id || $0.objectId == note.id }
+        XCTAssertEqual(queued.count, 2)
+        XCTAssertTrue(queued.contains { $0.payload.contains("#3E6B4F") })
+        let cleared = try store.setShelfColor(id: folder.id, hex: "")
+        XCTAssertEqual(cleared.catalog.shelfColor, "")
+        XCTAssertThrowsError(try store.setShelfColor(id: note.id, hex: "blue"))
+        XCTAssertEqual(try store.loadDocument(id: note.id)?.catalog.shelfColor, "#8C3A4A")
+        XCTAssertEqual(CatalogMetadata.decode("{}", kind: .folder).shelfColor, "")
+    }
+
     func testOlderDocumentsDecodeWithoutInventingClassificationOrInbox() throws {
         let pdf = CatalogMetadata.decode("{}", kind: .pdf)
         XCTAssertEqual(pdf.category, .unclassified)

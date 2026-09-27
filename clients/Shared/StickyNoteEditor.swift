@@ -350,7 +350,7 @@ private struct StickyCard: View {
                 .accessibilityIdentifier("sticky-image-"+block.id)
         } else {
             Label("图片便签", ink: "photo")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(LibraryPalette.muted)
         }
     }
 
@@ -367,7 +367,7 @@ private struct StickyCard: View {
                 Text("语音便签").font(.headline)
                 Text(Self.clock(block.duration ?? 0))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LibraryPalette.muted)
             }
             Spacer()
         }

@@ -12,6 +12,36 @@ public struct SavedLibrarySession: Codable, Sendable, Equatable {
 public struct SessionVault: Sendable {
     public let service: String
     public init(service: String = "TokenLibrary.sessions") { self.service = service }
+    #if os(macOS)
+    /// The login keychain asks for the account password whenever this app is
+    /// signed again. The session file stays inside this user account instead.
+    private func sessionFile(server: URL) throws -> URL {
+        let account = try ServerAddress.normalize(server.absoluteString).absoluteString
+        let name = BlobIntegrity.sha256(Data((service + "\n" + account).utf8))
+        let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("TokenLibrary/Sessions", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+        return directory.appendingPathComponent(name, isDirectory: false)
+    }
+    public func save(_ session: SavedLibrarySession, server: URL) throws {
+        let url = try sessionFile(server: server)
+        try JSONEncoder().encode(session).write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+    public func load(server: URL, interactionAllowed: Bool = true) throws -> SavedLibrarySession? {
+        _ = interactionAllowed
+        let url = try sessionFile(server: server)
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return try JSONDecoder().decode(SavedLibrarySession.self, from: Data(contentsOf: url))
+    }
+    public func delete(server: URL) throws {
+        let url = try sessionFile(server: server)
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+    #else
     private func query(server: URL) throws -> [String: Any] {
         [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
          kSecAttrAccount as String: try ServerAddress.normalize(server.absoluteString).absoluteString]
@@ -20,13 +50,17 @@ public struct SessionVault: Sendable {
         let base = try query(server: server)
         let data = try JSONEncoder().encode(session)
         let update = SecItemUpdate(base as CFDictionary, [kSecValueData as String: data] as CFDictionary)
-        if update == errSecItemNotFound {
-            var entry = base
-            entry[kSecValueData as String] = data
-            entry[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let status = SecItemAdd(entry as CFDictionary, nil)
-            guard status == errSecSuccess else { throw SessionVaultError.status(status) }
-        } else if update != errSecSuccess { throw SessionVaultError.status(update) }
+        if update == errSecSuccess { return }
+        guard update == errSecItemNotFound else { throw SessionVaultError.status(update) }
+        var entry = base
+        entry[kSecValueData as String] = data
+        entry[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        var added = SecItemAdd(entry as CFDictionary, nil)
+        if added == errSecDuplicateItem {
+            SecItemDelete(base as CFDictionary)
+            added = SecItemAdd(entry as CFDictionary, nil)
+        }
+        guard added == errSecSuccess else { throw SessionVaultError.status(added) }
     }
     public func load(server: URL, interactionAllowed: Bool = true) throws -> SavedLibrarySession? {
         var entry = try query(server: server)
@@ -47,6 +81,7 @@ public struct SessionVault: Sendable {
         let status = SecItemDelete(try query(server: server) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw SessionVaultError.status(status) }
     }
+    #endif
 }
 
 public enum SessionVaultError: LocalizedError {
