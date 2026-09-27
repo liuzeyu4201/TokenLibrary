@@ -11,6 +11,17 @@ final class PDFImportValidationTests: XCTestCase {
         try test(directory)
     }
 
+    func testRevisionPickerCancellationAndEmptySelectionAreNotSaveFailures() throws {
+        XCTAssertNil(try PDFImportValidation.revisionFile(from: .failure(CocoaError(.userCancelled))).get())
+        XCTAssertNil(try PDFImportValidation.revisionFile(from: .failure(CancellationError())).get())
+        XCTAssertNil(try PDFImportValidation.revisionFile(from: .success([])).get())
+        let file = URL(fileURLWithPath: "/tmp/paper.pdf")
+        XCTAssertEqual(try PDFImportValidation.revisionFile(from: .success([file])).get(), file)
+        XCTAssertThrowsError(try PDFImportValidation.revisionFile(from: .failure(CocoaError(.fileReadNoPermission))).get()) { error in
+            XCTAssertEqual((error as NSError).code, CocoaError.fileReadNoPermission.rawValue)
+        }
+    }
+
     func testPasswordRequiredIsDistinctFromCorruptionAndDoesNotModifyOriginal() throws {
         try withDirectory { directory in
             let url = directory.appendingPathComponent("locked.pdf")

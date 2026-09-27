@@ -23,6 +23,23 @@ public enum PDFImportError: LocalizedError, Equatable, Sendable {
 
 /// Validates the bytes that will actually be stored, without rewriting the original.
 public enum PDFImportValidation {
+    /// A dismissed picker or an empty selection is not a failed save.
+    public static func revisionFile(from result: Result<[URL], Error>) -> Result<URL?, Error> {
+        switch result {
+        case .success(let urls):
+            return .success(urls.first)
+        case .failure(let error):
+            if isUserCancellation(error) { return .success(nil) }
+            return .failure(error)
+        }
+    }
+
+    public static func isUserCancellation(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let cocoa = error as NSError
+        return cocoa.domain == NSCocoaErrorDomain && cocoa.code == NSUserCancelledError
+    }
+
     public static let maximumByteCount = 50_000_000
 
     public static func read(url: URL) throws -> Data {

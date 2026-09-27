@@ -909,25 +909,25 @@ struct CatalogInspectorView: View {
     }
 
     private func replacePDFOriginal(_ result: Result<[URL], Error>) {
-        switch result {
+        let selected: URL
+        switch PDFImportValidation.revisionFile(from: result) {
         case .failure(let error):
             errorMessage = error.localizedDescription
-        case .success(let urls):
-            guard let url = urls.first else {
-                errorMessage = "没有选中 PDF。"
-                return
-            }
-            let access = url.startAccessingSecurityScopedResource()
-            defer { if access { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let data = try PDFImportValidation.read(url: url)
-                let outcome = try store.replacePDFOriginal(id: doc.id, data: data, fileName: url.lastPathComponent)
-                current = outcome.document
-                notice = outcome.reviewMessage
-                onChange()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            return
+        case .success(let url):
+            guard let url else { return }
+            selected = url
+        }
+        let access = selected.startAccessingSecurityScopedResource()
+        defer { if access { selected.stopAccessingSecurityScopedResource() } }
+        do {
+            let data = try PDFImportValidation.read(url: selected)
+            let outcome = try store.replacePDFOriginal(id: doc.id, data: data, fileName: selected.lastPathComponent)
+            current = outcome.document
+            notice = outcome.reviewMessage
+            onChange()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
