@@ -15,6 +15,7 @@
 - [公开命令](#公开命令)
 - [文档](#文档)
 - [安全](#安全)
+- [许可](#许可)
 
 ## 现在做到哪一步
 
@@ -62,6 +63,7 @@ make start
 
 ```text
 .
+├── LICENSE                 # 本仓库代码与文档的 MIT 许可
 ├── assets                  # README 封面
 ├── clients                 # iOS / macOS、Shared、LibraryCore、打进 App 的编辑器
 ├── editor                  # 编辑器源码与浏览器测试
@@ -116,3 +118,9 @@ make start
 ## 安全
 
 真实配置只放在被忽略的 `.env`。`.env.example` 里的数据库口令、管理员口令哈希和上传令牌哈希留空。文档不写密码、会话 Token、真实服务器密钥或用户资料。
+
+## 许可
+
+TokenLibrary 自己的代码和文档以 [MIT License](LICENSE) 授权，版权所有 © 2026 liuzeyu4201。
+
+`third-party/security-audit-skill` 保持 Cloudflare 的 MIT 许可。`third-party/secure-agent-playbook` 保持 CC-BY-4.0。
