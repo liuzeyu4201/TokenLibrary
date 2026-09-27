@@ -14,6 +14,7 @@ import (
 
 type Config struct {
 	ListenAddr         string
+	MetricsAddr        string
 	DatabaseURL        string
 	DataRoot           string
 	BackupRoot         string
@@ -37,6 +38,7 @@ type Config struct {
 func Load() (Config, error) {
 	c := Config{
 		ListenAddr:        getenv("LISTEN_ADDR", ":8080"),
+		MetricsAddr:       getenv("METRICS_ADDR", ":9091"),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		DataRoot:          os.Getenv("DATA_ROOT"),
 		BackupRoot:        os.Getenv("BACKUP_ROOT"),

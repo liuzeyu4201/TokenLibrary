@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	"tokenlibrary/internal/api"
 	"tokenlibrary/internal/config"
 	"tokenlibrary/internal/jobs"
@@ -32,6 +34,20 @@ func main() {
 	go runner.Loop(bg)
 	engine := api.New(cfg, s, runner)
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: engine, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 2 * time.Minute, WriteTimeout: 5 * time.Minute, IdleTimeout: 90 * time.Second}
+	if cfg.MetricsAddr != "" && cfg.MetricsAddr != "off" {
+		metrics := &http.Server{Addr: cfg.MetricsAddr, Handler: promhttp.Handler(), ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			log.Printf("metrics listening %s", cfg.MetricsAddr)
+			if err := metrics.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Printf("metrics: %v", err)
+			}
+		}()
+		defer func() {
+			mctx, cancelMetrics := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancelMetrics()
+			_ = metrics.Shutdown(mctx)
+		}()
+	}
 	go func() {
 		log.Printf("tokenlibrary listening %s library=%s epoch=%s", cfg.ListenAddr, s.LibID, s.Epoch)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -49,7 +49,7 @@ func New(cfg config.Config, s *store.Store, j *jobs.Runner) *gin.Engine {
 	if err := r.SetTrustedProxies(proxies); err != nil {
 		_ = r.SetTrustedProxies(nil)
 	}
-	r.Use(gin.Recovery())
+	r.Use(gin.Recovery(), accessLog(), observeHTTP())
 	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j, Logins: authn.NewLoginGate(time.Now), Hub: newChangeHub()}
 
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
@@ -112,6 +112,8 @@ type sessionInfo struct {
 	ID       uuid.UUID
 	DeviceID uuid.UUID
 	Token    string
+	Name     string
+	Platform string
 }
 
 func (s *Server) requireSession(c *gin.Context) {
@@ -137,14 +139,29 @@ func (s *Server) requireSession(c *gin.Context) {
 		c.AbortWithStatusJSON(503, errBody(c, "UNAVAILABLE", "session renewal unavailable", true))
 		return
 	}
-	_, _ = s.S.Pool.Exec(c, `UPDATE devices SET last_seen_at=now() WHERE id=$1`, did)
+	var name, platform string
+	_ = s.S.Pool.QueryRow(c, `SELECT name, platform FROM devices WHERE id=$1`, did).Scan(&name, &platform)
+	if p := cleanPlatform(c.GetHeader("X-Device-Platform")); p != "" {
+		n := cleanDeviceName(c.GetHeader("X-Device-Name"))
+		if p != platform || (n != "" && n != name) {
+			if n == "" {
+				n = name
+			}
+			_, _ = s.S.Pool.Exec(c, `UPDATE devices SET platform=$1, name=$2, last_seen_at=now() WHERE id=$3`, p, n, did)
+			platform, name = p, n
+		} else {
+			_, _ = s.S.Pool.Exec(c, `UPDATE devices SET last_seen_at=now() WHERE id=$1`, did)
+		}
+	} else {
+		_, _ = s.S.Pool.Exec(c, `UPDATE devices SET last_seen_at=now() WHERE id=$1`, did)
+	}
 	if ep := c.GetHeader("X-Library-Epoch"); ep != "" && c.Request.Method != "GET" {
 		if u, err := uuid.Parse(ep); err != nil || u != s.S.Epoch {
 			c.AbortWithStatusJSON(409, errBody(c, "EPOCH_CHANGED", "epoch", false))
 			return
 		}
 	}
-	c.Set("session", sessionInfo{ID: sid, DeviceID: did, Token: tok})
+	c.Set("session", sessionInfo{ID: sid, DeviceID: did, Token: tok, Name: name, Platform: platform})
 	c.Next()
 }
 
@@ -183,10 +200,14 @@ func (s *Server) login(c *gin.Context) {
 	// ClientIP uses X-Forwarded-For only after SetTrustedProxies names that peer.
 	if err := s.Logins.Acquire(c.ClientIP()); err != nil {
 		if errors.Is(err, authn.ErrVerifyBusy) {
+			authAttempts.WithLabelValues("busy").Inc()
+			logAuth("busy", "password_verification", c.ClientIP())
 			c.Header("Retry-After", "1")
 			c.JSON(429, errBody(c, "BUSY", "password verification busy", true))
 			return
 		}
+		authAttempts.WithLabelValues("rate_limited").Inc()
+		logAuth("rate_limited", "login_attempts", c.ClientIP())
 		c.Header("Retry-After", "900")
 		c.JSON(429, errBody(c, "RATE_LIMITED", "too many login attempts", false))
 		return
@@ -194,6 +215,8 @@ func (s *Server) login(c *gin.Context) {
 	ok := req.Username == s.Cfg.AdminUsername && authn.VerifyPassword(s.Cfg.AdminPasswordHash, req.Password)
 	s.Logins.Release(c.ClientIP(), !ok)
 	if !ok {
+		authAttempts.WithLabelValues("failure").Inc()
+		logAuth("failure", "credentials", c.ClientIP())
 		c.JSON(401, errBody(c, "UNAUTHORIZED", "invalid credentials", false))
 		return
 	}
@@ -209,9 +232,13 @@ func (s *Server) login(c *gin.Context) {
 	_, err = s.S.Pool.Exec(c, `INSERT INTO sessions(id, device_id, library_id, token_hash, credential_generation) VALUES ($1,$2,$3,$4,$5)`,
 		sid, did, s.S.LibID, authn.SHA256Bytes(tok), s.Cfg.CredentialGen)
 	if err != nil {
+		authAttempts.WithLabelValues("failure").Inc()
+		logAuth("failure", "session", c.ClientIP())
 		c.JSON(500, errBody(c, "INTERNAL", "session", false))
 		return
 	}
+	authAttempts.WithLabelValues("success").Inc()
+	logAuth("success", "credentials", c.ClientIP())
 	c.JSON(200, gin.H{"data": gin.H{
 		"sessionToken": tok,
 		"sessionId":    sid.String(),

@@ -1,0 +1,66 @@
+{
+  "uid": "tokenlibrary-sync",
+  "title": "同步",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "15s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "各设备最近一次成功同步",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "dateTimeFromNow"
+        }
+      },
+      "targets": [
+        {
+          "expr": "tokenlibrary_sync_last_unix_seconds * 1000",
+          "legendFormat": "{{platform}} · {{device}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "同步请求",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (platform, device, kind) (rate(tokenlibrary_sync_requests_total[5m]))",
+          "legendFormat": "{{platform}} · {{device}} · {{kind}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "同步失败",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (platform, device, status) (rate(tokenlibrary_sync_requests_total{status!~\"2..\"}[15m]))",
+          "legendFormat": "{{platform}} · {{device}} · {{status}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "logs",
+      "title": "同步日志",
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [
+        {
+          "expr": "{service=\"app\"} |= \"event=sync\""
+        }
+      ]
+    }
+  ]
+}

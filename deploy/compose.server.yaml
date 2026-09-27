@@ -47,6 +47,7 @@ services:
       BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-20m}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LISTEN_ADDR: :8080
+      METRICS_ADDR: :9091
       TOKENLIBRARY_TEST_HOOKS: ${TOKENLIBRARY_TEST_HOOKS:-0}
       SCHEMA_PATH: /app/schema/initial.sql
       CREDENTIAL_GENERATION: ${CREDENTIAL_GENERATION:-1}
@@ -55,6 +56,7 @@ services:
       - ${BACKUP_ROOT}:/backup
     expose:
       - "8080"
+      - "9091"
     networks:
       - internal
     user: "${APP_UID:-10001}:${APP_GID:-10001}"

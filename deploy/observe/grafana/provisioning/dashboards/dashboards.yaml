@@ -1,0 +1,10 @@
+apiVersion: 1
+
+providers:
+  - name: tokenlibrary
+    orgId: 1
+    folder: TokenLibrary
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards
