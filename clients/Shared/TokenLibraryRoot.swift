@@ -934,9 +934,9 @@ public struct TokenLibraryRoot: View {
             if let model {
                 LibrarySessionView(model:model)
             } else if let startupError {
-                ContentUnavailableView {
-                    Label("无法打开本机资料库", systemImage: "externaldrive.badge.exclamationmark")
-                } description: { Text(startupError) } actions: { Button("重试") { initialize() } }
+                InkUnavailable(title: "无法打开本机资料库", symbol: "externaldrive.badge.exclamationmark", message: startupError) {
+                    Button("重试") { initialize() }
+                }
             } else { ProgressView("正在打开资料库…") }
         }
         .task { if model == nil { initialize() }; model?.requestSync() }
@@ -955,25 +955,35 @@ private struct LibrarySessionView:View {
         Group {
             if model.session == nil && !model.offlineAccess { LoginView(model:model) }
             else { LibraryView(model:model) }
-        }.preferredColorScheme(model.colorScheme)
+        }
+        .tint(LibraryPalette.ink)
+        .background(LibraryPalette.paper)
+        .preferredColorScheme(model.colorScheme)
     }
 }
 
 struct LoginView: View {
     @ObservedObject var model: AppModel
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 18) {
+            Image("LibraryMark")
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 280)
+                .accessibilityLabel("TokenLibrary")
             Text("TokenLibrary").font(.largeTitle.bold())
             Text("个人文档库，两端共用同一账号").foregroundStyle(.secondary)
             TextField("服务器地址，例如 https://library.example.com", text: $model.server)
+                .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled().disabled(model.connectionBusy)
-            TextField("账号", text: $model.username).disabled(model.connectionBusy)
-            SecureField("密码", text: $model.password).disabled(model.connectionBusy)
-            HStack {
+            TextField("账号", text: $model.username).textFieldStyle(.roundedBorder).disabled(model.connectionBusy)
+            SecureField("密码", text: $model.password).textFieldStyle(.roundedBorder).disabled(model.connectionBusy)
+            HStack(spacing: 10) {
                 Button("测试连接") { model.testConnection() }
+                    .buttonStyle(InkButtonStyle())
                     .disabled(model.connectionBusy)
                 Button(model.connectionError == nil ? "登录" : "重试登录") { model.beginLogin() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(InkButtonStyle(prominent: true))
                     .disabled(model.connectionBusy)
             }
             if model.connectionBusy && model.credentialNotice == nil {
@@ -985,6 +995,7 @@ struct LoginView: View {
             }
             CredentialWaitingNotice(model: model)
             Button("使用本机文档") { model.useOffline() }
+                .buttonStyle(InkButtonStyle())
             Text("测试连接不会发送密码。本机文档无需联网即可打开。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("不提供注册").font(.footnote).foregroundStyle(.secondary)
@@ -1101,11 +1112,20 @@ struct LibraryView: View {
             .overlay {
                 if model.visibleDocs().isEmpty && unresolvedRows.isEmpty {
                     if model.searching { ProgressView("正在搜索本机资料…") }
-                    else { ContentUnavailableView(
-                        model.query.isEmpty ? "这里还没有文档" : "没有找到匹配的文档",
-                        systemImage: model.query.isEmpty ? "books.vertical" : "magnifyingglass",
-                        description: Text(model.query.isEmpty ? "新建笔记，或导入 Markdown 和 PDF 开始整理。" : "试试其他标题或正文关键词。")
-                    ) }
+                    else {
+                        ContentUnavailableView {
+                            VStack(spacing: 14) {
+                                if model.query.isEmpty {
+                                    Image("LibraryMark").resizable().scaledToFit().frame(width: 220).accessibilityHidden(true)
+                                } else {
+                                    InkGlyph(name: "magnifyingglass").frame(width: 40, height: 40)
+                                }
+                                Text(model.query.isEmpty ? "这里还没有文档" : "没有找到匹配的文档").font(.title3.weight(.semibold))
+                            }
+                        } description: {
+                            Text(model.query.isEmpty ? "新建笔记，或导入 Markdown 和 PDF 开始整理。" : "试试其他标题或正文关键词。")
+                        }
+                    }
                 }
             }
             .searchable(text: $model.query, isPresented: $model.searchPresented)
@@ -1116,8 +1136,8 @@ struct LibraryView: View {
                 if !model.isAtRoot {
                     ToolbarItem(placement: .automatic) {
                         Button(action: model.goUp) {
-                            Image(systemName: "chevron.left")
-                                .font(.body.weight(.semibold))
+                            InkGlyph(name: "chevron.left")
+                                .frame(width: 16, height: 16)
                                 .accessibilityLabel("返回上级")
                         }
                     }
@@ -1127,12 +1147,12 @@ struct LibraryView: View {
                     Button {
                         model.newNote()
                     } label: {
-                        Label("笔记", systemImage: "doc.richtext")
+                        Label("笔记", ink: "doc.richtext")
                     }
                     Button {
                         model.newFolder()
                     } label: {
-                        Label("文件夹", systemImage: "folder")
+                        Label("文件夹", ink: "folder")
                     }
                 }
                 Menu("导入") {
@@ -1161,7 +1181,7 @@ struct LibraryView: View {
                     Button("冲突与恢复草稿") { utilitySheet = .conflicts }
                     Button("设置") { utilitySheet = .settings }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
+                    InkGlyph(name: "ellipsis.circle").frame(width: 22, height: 22)
                 }
                 }
             }
@@ -1198,7 +1218,9 @@ struct LibraryView: View {
                 if let error = model.localOperationError {
                     HStack(alignment:.top) {
                         Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
-                        Button("关闭提示",systemImage:"xmark.circle") { model.dismissLocalOperationError() }
+                        Button { model.dismissLocalOperationError() } label: {
+                            InkGlyph(name: "xmark.circle").frame(width: 16, height: 16)
+                        }.accessibilityLabel("关闭本地操作错误提示")
                             .accessibilityLabel("关闭本地操作错误提示")
                     }
                 }
@@ -1337,7 +1359,7 @@ struct LibraryView: View {
                 Button {
                     model.openFolder(doc)
                 } label: {
-                    Label(doc.name, systemImage: "folder").frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                    Label(doc.name, ink: "folder").frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle()).padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
             } else if model.isSelectedPDFSearchResult(doc.id) {
@@ -1359,7 +1381,7 @@ struct LibraryView: View {
         .contextMenu { docMenu(doc) }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             Button { model.moveTarget = doc } label: {
-                Label("移动到…", systemImage: "folder")
+                Label("移动到…", ink: "folder")
             }
             .tint(.accentColor)
             .accessibilityIdentifier("move-document-" + doc.id)
@@ -1376,15 +1398,22 @@ struct LibraryView: View {
     }
 
     private func documentRowLabel(_ doc:LibraryDocument)->some View {
-        VStack(alignment: .leading) {
-            Text(doc.name)
-            Text(doc.status.rawValue).font(.caption).foregroundStyle(.secondary)
-            if doc.catalog.archived { Label("已归档",systemImage:"archivebox").font(.caption).foregroundStyle(.secondary) }
-            if !model.query.isEmpty,let hit=model.searchResults.first(where:{$0.objectId == doc.id}) {
-                Text(hit.excerpt).font(.caption).lineLimit(3).foregroundStyle(.secondary)
-                Text(model.folderBreadcrumb(doc)+(hit.pageIndex.map { " · 第 \($0+1) 页" } ?? "")).font(.caption2).foregroundStyle(.secondary)
+        HStack(alignment: .top, spacing: 10) {
+            InkGlyph(name: doc.kind == .pdf ? "doc.text.magnifyingglass" : "note.text")
+                .frame(width: 22, height: 22)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(doc.name).lineLimit(2)
+                Text(doc.status.rawValue).font(.caption).foregroundStyle(.secondary)
+                if doc.catalog.archived { Label("已归档", ink: "archivebox").font(.caption).foregroundStyle(.secondary) }
+                if !model.query.isEmpty,let hit=model.searchResults.first(where:{$0.objectId == doc.id}) {
+                    Text(hit.excerpt).font(.caption).lineLimit(3).foregroundStyle(.secondary)
+                    Text(model.folderBreadcrumb(doc)+(hit.pageIndex.map { " · 第 \($0+1) 页" } ?? "")).font(.caption2).foregroundStyle(.secondary)
+                }
             }
-        }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
     }
 
     @ViewBuilder
@@ -1412,7 +1441,7 @@ struct MoveDocumentView:View {
         NavigationStack {
             List {
                 Button { performMove(model.rootFor(document.parentId)) } label: {
-                    Label("资料库根目录",systemImage:"books.vertical")
+                    Label("资料库根目录", ink: "books.vertical")
                         .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                 }
                     .buttonStyle(.plain)
@@ -1422,7 +1451,7 @@ struct MoveDocumentView:View {
                         performMove(folder.id)
                     } label: {
                         VStack(alignment:.leading) {
-                            Label(folder.name,systemImage:"folder")
+                            Label(folder.name, ink: "folder")
                             Text(model.folderBreadcrumb(folder)).font(.caption).foregroundStyle(.secondary)
                         }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(folder.id == document.parentId)
@@ -1449,7 +1478,7 @@ struct EditorScreen: View {
                 VStack(spacing:0) {
                   if doc.catalog.archived {
                     HStack {
-                        Label("已归档 · 阅读模式",systemImage:"archivebox")
+                        Label("已归档 · 阅读模式", ink: "archivebox")
                         Spacer()
                         Button("继续编辑") {
                             editorHandle.flush { saved in
@@ -1469,7 +1498,7 @@ struct EditorScreen: View {
                 .navigationTitle(doc.catalogTitle)
                 .toolbar {
                     if let note=model.sourceReturnNote {
-                        Button("返回笔记",systemImage:"arrow.uturn.backward") { editorHandle.flush { if $0 { model.returnToReadingNote() } } }
+                        Button { editorHandle.flush { if $0 { model.returnToReadingNote() } } } label: { Label("返回笔记", ink: "arrow.uturn.backward") }
                             .help(note.catalogTitle)
                     }
                     Button("资料详情") { inspecting = true }
@@ -1486,7 +1515,7 @@ struct EditorScreen: View {
                             }
                         }
                         Button("导出") { editorHandle.flush { if $0 { model.prepareExport(doc) } } }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                    } label: { InkGlyph(name: "ellipsis.circle").frame(width: 22, height: 22) }
                 }
                 #if canImport(UIKit)
                 .sheet(isPresented: $stickyPresented) {
@@ -1505,7 +1534,7 @@ struct EditorScreen: View {
                     }
                     .frame(minWidth: 320, minHeight: 450)
                 }
-            } else { ContentUnavailableView("文档不可用", systemImage: "doc", description: Text("返回资料库查看其他文档。")) }
+            } else { InkUnavailable(title: "文档不可用", symbol: "doc", message: "返回资料库查看其他文档。") { EmptyView() } }
         }
     }
 }
@@ -1617,7 +1646,7 @@ struct PDFReaderView: View {
     }
     private var pageControls:some View {
         HStack {
-            Button { goTo(pageNumber-2) } label: { Image(systemName:"chevron.left") }
+            Button { goTo(pageNumber-2) } label: { InkGlyph(name: "chevron.left").frame(width: 16, height: 16) }
                 .disabled(pageNumber<=1).accessibilityLabel("上一页")
             TextField("页码",text:$pageInput).frame(width:48).multilineTextAlignment(.center)
                 .focused($focusedField,equals:.page)
@@ -1628,7 +1657,7 @@ struct PDFReaderView: View {
             Button("前往",action:submitPageInput)
                 .accessibilityLabel("前往输入页码")
             Text("/ \(totalPages)").foregroundStyle(.secondary)
-            Button { goTo(pageNumber) } label: { Image(systemName:"chevron.right") }
+            Button { goTo(pageNumber) } label: { InkGlyph(name: "chevron.right").frame(width: 16, height: 16) }
                 .disabled(pageNumber>=totalPages).accessibilityLabel("下一页")
         }.fixedSize(horizontal:true,vertical:false)
     }
@@ -1657,7 +1686,7 @@ struct PDFReaderView: View {
     @ToolbarContentBuilder private func readerToolbar(_ document:LibraryDocument)->some ToolbarContent {
         ToolbarItemGroup {
             if let note=model.sourceReturnNote {
-                Button("返回笔记",systemImage:"arrow.uturn.backward",action:model.returnToReadingNote).help(note.catalogTitle)
+                Button(action: model.returnToReadingNote) { Label("返回笔记", ink: "arrow.uturn.backward") }.help(note.catalogTitle)
             }
             Button("高亮",action:addHighlight)
             Menu("批注与摘录") {
@@ -1669,7 +1698,7 @@ struct PDFReaderView: View {
                 Button("资料详情") { inspectorPresented=true }
                 Button("重命名") { model.beginRename(document) }
                 Button("导出含批注 PDF") { model.prepareExport(document) }
-            } label: { Image(systemName:"ellipsis.circle") }
+            } label: { InkGlyph(name: "ellipsis.circle").frame(width: 22, height: 22) }
         }
     }
     private var annotationsSheet:some View {
@@ -1707,7 +1736,7 @@ struct PDFReaderView: View {
                                 } else { Text("原选择已不可用，请重新选择") }
                             }
                             Spacer()
-                            Image(systemName:"chevron.right").foregroundStyle(.secondary)
+                            InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(.secondary)
                         }.frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityLabel("选择摘录笔记")
                 }
@@ -1900,7 +1929,7 @@ struct PDFAnnotationsView: View {
             if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
           }.padding()
         }
-        .overlay { if annotations.isEmpty { ContentUnavailableView("暂无本库新增批注",systemImage:"pencil.tip",description:Text("原件自带批注仍保留在 PDF 中；这里管理在本库新增的高亮和备注。")) } }
+        .overlay { if annotations.isEmpty { InkUnavailable(title: "暂无本库新增批注", symbol: "pencil.tip", message: "原件自带批注仍保留在 PDF 中；这里管理在本库新增的高亮和备注。") { EmptyView() } } }
         .navigationTitle("高亮与文字批注")
         .sheet(isPresented:Binding(get:{editing != nil},set:{if !$0 { editing=nil }})) {
             NavigationStack {
@@ -1937,7 +1966,7 @@ struct TrashView: View {
     var body: some View {
         Group {
             if trashedDocuments.isEmpty {
-                ContentUnavailableView("回收站为空",systemImage:"trash",description:Text("删除的资料会在这里保留 30 天，可在到期前还原。"))
+                InkUnavailable(title: "回收站为空", symbol: "trash", message: "删除的资料会在这里保留 30 天，可在到期前还原。") { EmptyView() }
             } else {
                 ScrollView {
                     LazyVStack(alignment:.leading,spacing:16) {

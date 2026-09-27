@@ -160,7 +160,7 @@ struct EditorWebView: View {
                         .accessibilityElement(children:.combine).accessibilityIdentifier("editor-loading")
                 case .failed(let message):
                     VStack(spacing:12) {
-                        Label("编辑器暂时无法打开",systemImage:"exclamationmark.triangle").font(.headline)
+                        Label("编辑器暂时无法打开", ink: "exclamationmark.triangle").font(.headline)
                         Text(message).font(.callout).multilineTextAlignment(.center)
                         if let pending=host.pendingEdit {
                             Text("未保存的输入（可选择复制）").font(.caption)

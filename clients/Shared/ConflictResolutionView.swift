@@ -43,8 +43,8 @@ struct ConflictResolutionView: View {
         }
         .navigationTitle("冲突与恢复草稿")
         .overlay {
-            if let error { ContentUnavailableView("无法读取恢复材料",systemImage:"exclamationmark.triangle",description:Text(error)) }
-            else if conflicts.isEmpty && drafts.isEmpty { ContentUnavailableView("没有待处理内容",systemImage:"checkmark.circle",description:Text("可以继续编辑和同步。")) }
+            if let error { InkUnavailable(title: "无法读取恢复材料", symbol: "exclamationmark.triangle", message: error) { EmptyView() } }
+            else if conflicts.isEmpty && drafts.isEmpty { InkUnavailable(title: "没有待处理内容", symbol: "checkmark.circle", message: "可以继续编辑和同步。") { EmptyView() } }
         }
         .onAppear(perform:reload)
         .onChange(of:model.documents) { _,_ in reload() }
@@ -89,14 +89,17 @@ private struct EditorDraftDetailView:View {
                     }
                     Text("恢复会新建副本，保留现有资料和回收站状态。PDF 批注只恢复到原文件版本。").font(.caption).foregroundStyle(.secondary)
                     if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                    Button("恢复为新副本") {
-                        do { onRecovered(try store.recoverEditorDraftAsCopy(id:draft.id,parentId:parentID)) }
-                        catch { self.error=error.localizedDescription }
-                    }.buttonStyle(.borderedProminent)
-                    Button("删除此恢复草稿",role:.destructive) { confirmingDiscard=true }
+                    HStack(spacing: 10) {
+                        Button("恢复为新副本") {
+                            do { onRecovered(try store.recoverEditorDraftAsCopy(id:draft.id,parentId:parentID)) }
+                            catch { self.error=error.localizedDescription }
+                        }.buttonStyle(InkButtonStyle(prominent: true))
+                        Button("删除此恢复草稿",role:.destructive) { confirmingDiscard=true }
+                            .buttonStyle(InkButtonStyle())
+                    }
                 }.padding(20)
             }.navigationTitle(draft.name)
-            .toolbar { Button("稍后处理") { dismiss() } }
+            .toolbar { Button("稍后处理") { dismiss() }.buttonStyle(InkButtonStyle()) }
         }.frame(minWidth:320,minHeight:450)
         .confirmationDialog("永久删除此恢复草稿？",isPresented:$confirmingDiscard,titleVisibility:.visible) {
             Button("删除草稿",role:.destructive) {
@@ -126,11 +129,16 @@ private struct ConflictDetailView: View {
                     Text("比较两个版本后再保存。处理期间原内容与双方修改都会保留。")
                         .foregroundStyle(.secondary)
                     ViewThatFits(in:.horizontal) {
-                        HStack(alignment:.top,spacing:16) {
-                            snapshotView("本机修改",value:local).frame(minWidth:280)
-                            snapshotView("服务器修改",value:remote).frame(minWidth:280)
+                        HStack(alignment:.top,spacing:12) {
+                            snapshotView("本机",value:local).frame(minWidth:220)
+                            snapshotView("服务器",value:remote).frame(minWidth:220)
+                            if isMarkdown { mergeColumn.frame(minWidth:240) }
                         }
-                        VStack(alignment:.leading,spacing:16) { snapshotView("本机修改",value:local);snapshotView("服务器修改",value:remote) }
+                        VStack(alignment:.leading,spacing:16) {
+                            snapshotView("本机",value:local)
+                            snapshotView("服务器",value:remote)
+                            if isMarkdown { mergeColumn }
+                        }
                     }
                     if isMarkdown {
                         DisclosureGroup("查看相对共同版本的源码变化") {
@@ -139,35 +147,60 @@ private struct ConflictDetailView: View {
                                 SourceDifference(title:"服务器",base:base["markdownSource"] as? String ?? "",changed:remote["markdownSource"] as? String ?? "")
                             }
                         }
-                        Text("合并后的 Markdown").font(.headline)
-                        TextEditor(text:$draft).font(.system(.body,design:.monospaced)).frame(minHeight:260)
-                            .border(Color.secondary.opacity(0.2)).accessibilityLabel("合并后的 Markdown")
                     }
                     if let error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                     if model.client == nil { Text("请先重新连接服务器，再提交冲突处理结果。原内容仍保留在本机。").foregroundStyle(.secondary) }
-                    HStack {
-                        Button("保留本机版本") { resolve(.local) }
-                        Button("采用服务器版本") { resolve(.remote) }
-                        if isMarkdown { Button("保存合并内容") { resolve(.customMarkdown(draft)) }.buttonStyle(.borderedProminent) }
-                    }.disabled(busy || model.client == nil)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Button("保留本机版本") { resolve(.local) }.buttonStyle(InkButtonStyle())
+                            Button("采用服务器版本") { resolve(.remote) }.buttonStyle(InkButtonStyle())
+                            if isMarkdown { Button("保存合并内容") { resolve(.customMarkdown(draft)) }.buttonStyle(InkButtonStyle(prominent: true)) }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .disabled(busy || model.client == nil)
                     if busy { ProgressView("正在保存处理结果…") }
                 }.padding(20)
             }
+            .background(LibraryPalette.paper)
             .navigationTitle("比较与解决冲突")
-            .toolbar { Button("稍后处理") { dismiss() }.disabled(busy) }
+            .toolbar { Button("稍后处理") { dismiss() }.buttonStyle(InkButtonStyle()).disabled(busy) }
         }
         .frame(minWidth:320,minHeight:540)
         .onAppear { draft=local["markdownSource"] as? String ?? "" }
+    }
+    private var mergeColumn: some View {
+        VStack(alignment:.leading,spacing:8) {
+            Text("合并结果").font(.headline)
+            Text("保存前可以改这段文字。未提交前不会标为已同步。")
+                .font(.caption).foregroundStyle(.secondary)
+            TextEditor(text:$draft)
+                .font(.system(.body,design:.monospaced))
+                .frame(minHeight:220)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .background(LibraryPalette.paper, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(LibraryPalette.ink.opacity(0.28), lineWidth: 1) }
+                .accessibilityLabel("合并后的 Markdown")
+        }
+        .padding(14)
+        .frame(maxWidth:.infinity,alignment:.leading)
+        .background(LibraryPalette.paper, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(LibraryPalette.ink.opacity(0.18), lineWidth: 1) }
     }
     @ViewBuilder func snapshotView(_ title:String,value:[String:Any])->some View {
         VStack(alignment:.leading,spacing:8) {
             Text(title).font(.headline)
             Text(value["name"] as? String ?? "未命名")
-            if value["state"] as? String == "trashed" { Label("已移入回收站",systemImage:"trash") }
+            if value["state"] as? String == "trashed" { Label("已移入回收站", ink: "trash") }
             if let text=value["markdownSource"] as? String { Text(text).font(.system(.caption,design:.monospaced)).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading) }
             if let annotations=value["annotations"] as? [Any] { Text("\(annotations.count) 条 PDF 批注") }
             if let metadata=value["metadata"] as? [String:Any],let title=metadata["title"] as? String,!title.isEmpty { Text("资料标题：\(title)") }
-        }.padding(14).background(Color.secondary.opacity(0.07),in:RoundedRectangle(cornerRadius:12))
+        }
+        .padding(14)
+        .frame(maxWidth:.infinity,alignment:.topLeading)
+        .background(LibraryPalette.paper, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(LibraryPalette.ink.opacity(0.18), lineWidth: 1) }
     }
     func snapshot(_ json:String)->[String:Any] { (try? JSONSerialization.jsonObject(with:Data(json.utf8))) as? [String:Any] ?? [:] }
     func resolve(_ resolution:ConflictResolution) {

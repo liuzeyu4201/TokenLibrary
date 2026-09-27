@@ -170,10 +170,10 @@ struct StickyNoteEditor: View {
                 Button {
                     if saveBlocks() { onExport() }
                 } label: {
-                    Label("导出 Markdown 与附件", systemImage: "square.and.arrow.up")
+                    Label("导出 Markdown 与附件", ink: "square.and.arrow.up")
                 }
             } label: {
-                Image(systemName: "ellipsis")
+                InkGlyph(name: "ellipsis").frame(width: 18, height: 18)
                     .rotationEffect(.degrees(90))
             }
         }
@@ -349,7 +349,7 @@ private struct StickyCard: View {
                 .accessibilityLabel(block.text.isEmpty ? "图片便签" : "图片便签，"+block.text)
                 .accessibilityIdentifier("sticky-image-"+block.id)
         } else {
-            Label("图片便签", systemImage: "photo")
+            Label("图片便签", ink: "photo")
                 .foregroundStyle(.secondary)
         }
     }
@@ -357,7 +357,7 @@ private struct StickyCard: View {
     private var voiceBody: some View {
         HStack(spacing: 12) {
             Button(action: onPlay) {
-                Image(systemName: playing ? "stop.circle.fill" : "play.circle.fill")
+                InkGlyph(name: playing ? "stop.circle.fill" : "play.circle.fill").frame(width: 22, height: 22)
                     .font(.system(size: 36))
             }
             .accessibilityIdentifier("sticky-voice-"+block.id+"-play")
@@ -430,12 +430,12 @@ private struct InsertBar: View {
     var body: some View {
         HStack {
             Menu {
-                Button("文字便签", systemImage: "note.text", action: onText)
-                Button("图片", systemImage: "photo", action: onPhoto)
-                Button(starting ? "等待麦克风授权…" : (recording ? "停止录音" : "语音"), systemImage: recording ? "stop.circle.fill" : "mic", action: onVoice)
+                Button(action: onText) { Label("文字便签", ink: "note.text") }
+                Button(action: onPhoto) { Label("图片", ink: "photo") }
+                Button(action: onVoice) { Label(starting ? "等待麦克风授权…" : (recording ? "停止录音" : "语音"), ink: recording ? "stop.circle.fill" : "mic") }
                     .disabled(starting)
             } label: {
-                Label("插入", systemImage: "plus.circle.fill")
+                Label("插入", ink: "plus.circle.fill")
                     .font(.body.weight(.semibold))
             }
             Spacer()

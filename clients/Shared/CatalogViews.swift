@@ -85,7 +85,7 @@ struct CatalogWorkspaceView: View {
                             if [.inbox, .reading, .archived].contains(item) { filters.archive = .all }
                             if item == .reading { filters.readingStatus = nil }
                         } label: {
-                            Label(item.title, systemImage: item.symbol)
+                            Label(item.title, ink: item.symbol)
                                 .font(.subheadline)
                                 .padding(.horizontal, 12).padding(.vertical, 8)
                                 .background(section == item ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.07), in: Capsule())
@@ -98,7 +98,7 @@ struct CatalogWorkspaceView: View {
             }
             if let topicID, let topic = documents.first(where: { $0.id == topicID }) {
                 HStack {
-                    Label(topic.catalogTitle, systemImage: "square.stack.3d.up")
+                    Label(topic.catalogTitle, ink: "square.stack.3d.up")
                     Spacer()
                     Button("查看全部") { self.topicID = nil }
                 }.padding(.horizontal).padding(.bottom, 8)
@@ -115,7 +115,7 @@ struct CatalogWorkspaceView: View {
                 ProgressView("正在查找资料…").frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if currentResults.isEmpty {
                 ContentUnavailableView {
-                    Label(filters.count > 0 ? "没有符合条件的资料" : (query.isEmpty ? (topicID == nil ? "这里还没有资料" : "这个专题还没有资料") : "没有找到匹配资料"), systemImage: section.symbol)
+                    Label(filters.count > 0 ? "没有符合条件的资料" : (query.isEmpty ? (topicID == nil ? "这里还没有资料" : "这个专题还没有资料") : "没有找到匹配资料"), ink: section.symbol)
                 } description: {
                     Text(emptyDescription)
                     if !query.isEmpty, let coverage = response?.coverage { Text(coverage.summary) }
@@ -149,9 +149,9 @@ struct CatalogWorkspaceView: View {
         .searchable(text: $query, prompt: "标题、作者、正文、摘录")
         .toolbar {
             Button { filtersPresented = true } label: {
-                Label(filters.count == 0 ? "筛选与排序" : "筛选（\(filters.count)）", systemImage: "line.3.horizontal.decrease.circle")
+                Label(filters.count == 0 ? "筛选与排序" : "筛选（\(filters.count)）", ink: "line.3.horizontal.decrease.circle")
             }.accessibilityValue("\(filters.count) 项条件，按\(sort.title)排序")
-            Button { newTopic = true } label: { Label("新建专题", systemImage: "folder.badge.plus") }
+            Button { newTopic = true } label: { Label("新建专题", ink: "folder.badge.plus") }
         }
         .sheet(isPresented: $filtersPresented) {
             CatalogFilterSheet(initial: filters, initialSort: sort, section: section, tags: availableTags) { updated, sorting in
@@ -221,11 +221,11 @@ struct CatalogWorkspaceView: View {
             } label: { CatalogDocumentRow(document: doc) }
             .buttonStyle(.plain)
             Spacer(minLength: 4)
-            Button { inspected = doc } label: { Image(systemName: "info.circle") }
+            Button { inspected = doc } label: { InkGlyph(name: "info.circle").frame(width: 18, height: 18) }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("\(doc.catalogTitle) 的资料详情")
             Menu { catalogActions(doc) } label: {
-                Label("更多", systemImage: "ellipsis.circle")
+                Label("更多", ink: "ellipsis.circle")
             }
             .buttonStyle(.borderless)
             .accessibilityLabel("\(doc.catalogTitle) 的更多操作")
@@ -390,14 +390,14 @@ private struct CatalogDocumentRow: View {
     let document: LibraryDocument
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: document.catalog.category.symbol).font(.title2).foregroundStyle(.tint)
+            InkGlyph(name: document.catalog.category.symbol).frame(width: 28, height: 28)
                 .frame(width: 32).padding(.top, 3)
             VStack(alignment: .leading, spacing: 5) {
                 Text(document.catalogTitle).font(.headline).multilineTextAlignment(.leading)
                 if !subtitle.isEmpty { Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                 HStack(spacing: 8) {
-                    if document.catalog.archived { Label("归档", systemImage: "archivebox") }
-                    else if document.catalog.inbox { Label("待整理", systemImage: "tray") }
+                    if document.catalog.archived { Label("归档", ink: "archivebox") }
+                    else if document.catalog.inbox { Label("待整理", ink: "tray") }
                     if document.kind != .folder { Text(document.catalog.readingStatus.title) }
                     Text(document.status.rawValue)
                 }.font(.caption2).foregroundStyle(.secondary)
@@ -486,7 +486,7 @@ private struct CatalogSelectionCandidateRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: candidate.symbol).foregroundStyle(.tint).frame(width: 24)
+            InkGlyph(name: candidate.symbol).frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 4) {
                 Text(candidate.title).font(.headline).multilineTextAlignment(.leading)
                 Text("文件：" + candidate.filename).font(.caption).foregroundStyle(.secondary)
@@ -527,9 +527,9 @@ struct CatalogDocumentSelectionSheet: View {
                             onSelect("")
                         } label: {
                             HStack {
-                                Label("新建阅读笔记", systemImage: "square.and.pencil")
+                                Label("新建阅读笔记", ink: "square.and.pencil")
                                 Spacer()
-                                if selectedID.isEmpty { Image(systemName: "checkmark") }
+                                if selectedID.isEmpty { InkGlyph(name: "checkmark").frame(width: 16, height: 16) }
                             }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
@@ -549,7 +549,7 @@ struct CatalogDocumentSelectionSheet: View {
                         Button { onSelect(candidate.id) } label: {
                             HStack {
                                 CatalogSelectionCandidateRow(candidate: candidate)
-                                if selectedID == candidate.id { Image(systemName: "checkmark").foregroundStyle(.tint) }
+                                if selectedID == candidate.id { InkGlyph(name: "checkmark").frame(width: 16, height: 16) }
                             }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                         }.buttonStyle(.plain)
                     }
@@ -763,6 +763,7 @@ struct CatalogInspectorView: View {
             if doc.catalog.inbox && doc.state == "active" && !doc.catalog.archived {
                 Section {
                     Button("整理完成，移出收件箱") { perform { _ = try store.markCatalogOrganized(id: doc.id) } }
+                        .buttonStyle(InkButtonStyle())
                         .accessibilityLabel("整理完成，移出收件箱")
                     Text("点这里即可离开收件箱。标题、作者和专题可以稍后补，阅读不受影响。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -770,7 +771,7 @@ struct CatalogInspectorView: View {
             }
             if doc.catalog.archived {
                 Section {
-                    Label("已归档 · 原件和关联仍保留", systemImage: "archivebox")
+                    Label("已归档 · 原件和关联仍保留", ink: "archivebox")
                     Button("恢复整理") { perform { _ = try store.setCatalogArchived(id: doc.id, archived: false) } }
                 }
             }
@@ -796,9 +797,12 @@ struct CatalogInspectorView: View {
         .navigationTitle("资料详情")
         .interactiveDismissDisabled(hasUnsavedInputs)
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) { Button("完成") { requestLeave(.done) } }
+            ToolbarItem(placement: .cancellationAction) {
+                Button("完成") { requestLeave(.done) }.buttonStyle(InkButtonStyle())
+            }
             ToolbarItem(placement: .confirmationAction) {
                 Button("保存资料信息") { saveDraft() }
+                    .buttonStyle(InkButtonStyle(prominent: true))
                     .disabled(doc.catalog.archived || !hasDraftChanges || doc.state != "active")
                     .accessibilityLabel("保存资料信息")
             }
@@ -901,6 +905,7 @@ struct CatalogInspectorView: View {
             if !doc.catalog.archived { Button("归档") { perform { _ = try store.setCatalogArchived(id: doc.id, archived: true) } } }
             if doc.kind == .pdf && doc.state == "active" && !doc.catalog.archived {
                 Button("更换 PDF 原件") { revisionPicker = true }
+                    .buttonStyle(InkButtonStyle())
                     .accessibilityLabel("更换 PDF 原件")
                 Text("更换后仍是同一份资料。旧批注和摘录位置会标成待核对，上一份原件不会被覆盖。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -1028,7 +1033,7 @@ struct CatalogInspectorView: View {
                     else { Text("原选择已不可用，请重新选择").foregroundStyle(.secondary) }
                 }
                 Spacer(minLength: 8)
-                Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                InkGlyph(name: "chevron.right").frame(width: 12, height: 12).foregroundStyle(.secondary)
             }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
         }.buttonStyle(.plain)
     }
@@ -1085,7 +1090,7 @@ struct CatalogInspectorView: View {
                 else { requestLeave(.document(source)) }
             }.disabled(state == .checking)
             if state == .fileChanged || state == .unverifiedVersion { Text("保留摘录文字；请核对原文件的对应位置。 ").font(.caption).foregroundStyle(.orange) }
-        } else { Label(state.title, systemImage: "link.badge.plus").font(.caption).foregroundStyle(.secondary) }
+        } else { Label(state.title, ink: "link.badge.plus").font(.caption).foregroundStyle(.secondary) }
     }
 
     private var hasDraftChanges: Bool { form.isDirty }
