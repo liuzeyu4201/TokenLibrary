@@ -58,20 +58,42 @@ extension SyncClient {
         guard let id = page["snapshotId"]?.string, UUID(uuidString: id) != nil, let atSeq = page["atSeq"]?.int64,
               page["epoch"]?.string == epoch else { throw SyncFailure.invalidResponse }
         var snapshots: [DocumentSnapshot] = []
+        var present = Set<String>()
         var cursor = "0"
+        // iPhone applies each catalog page immediately and never asks for file
+        // bytes here. Mac still waits until every body is stored, then commits
+        // the snapshot in one transaction.
+        let epochRestart = downloadsBodies ? false : (try store.prepareEpochChange(epoch))
         while true {
             try Task.checkCancellation()
             guard page["snapshotId"]?.string == id, page["epoch"]?.string == epoch, page["atSeq"]?.int64 == atSeq,
                   let items = page["items"]?.array, let hasMore = page["hasMore"]?.bool else { throw SyncFailure.invalidResponse }
-            for item in items { snapshots.append(try normalizedSnapshot(item)) }
+            var pageSnapshots: [DocumentSnapshot] = []
+            for item in items {
+                let snapshot = try normalizedSnapshot(item)
+                pageSnapshots.append(snapshot)
+                if let itemID = snapshot["id"]?.string { present.insert(itemID) }
+            }
+            if downloadsBodies {
+                snapshots.append(contentsOf: pageSnapshots)
+            } else {
+                try store.applyRemoteSnapshotPage(pageSnapshots)
+                if epochRestart { try store.adoptEpochConflictRemotes(pageSnapshots) }
+                onLibraryPage?()
+            }
             if !hasMore { break }
             guard let next = page["nextCursor"]?.string, next != cursor else { throw SyncFailure.invalidResponse }
             cursor = next
             page = try await requestJSON(path: "/api/v1/sync/snapshots/\(id)", query: ["after": cursor, "limit": "100"])
         }
-        for snapshot in snapshots { try await downloadAttachments(snapshot: snapshot, store: store) }
-        try store.applyRemoteBatch(snapshots, deletedIds: [], cursor: atSeq, epoch: epoch, fullSnapshot: true)
-        return snapshots.count
+        if downloadsBodies {
+            for snapshot in snapshots { try await downloadAttachments(snapshot: snapshot, store: store) }
+            try store.applyRemoteBatch(snapshots, deletedIds: [], cursor: atSeq, epoch: epoch, fullSnapshot: true)
+            return snapshots.count
+        }
+        try store.finishRemoteSnapshot(presentIds: present, cursor: atSeq, epoch: epoch)
+        onLibraryPage?()
+        return present.count
     }
 
     func pullChanges(store: DocumentStore, epoch: String) async throws -> SyncSummary {
@@ -92,8 +114,11 @@ extension SyncClient {
                 for id in removed { guard let value = id.string else { throw SyncFailure.invalidResponse }; deleted.append(value) }
             }
             guard last == next, !hasMore || next > cursor else { throw SyncFailure.invalidResponse }
-            for snapshot in snapshots { try await downloadAttachments(snapshot: snapshot, store: store) }
+            if downloadsBodies {
+                for snapshot in snapshots { try await downloadAttachments(snapshot: snapshot, store: store) }
+            }
             try store.applyRemoteBatch(snapshots, deletedIds: deleted, cursor: next, epoch: epoch)
+            if !downloadsBodies { onLibraryPage?() }
             result.downloaded += snapshots.count; result.deleted += deleted.count
             cursor = next
             if !hasMore { break }
@@ -145,7 +170,7 @@ extension SyncClient {
             try await flushPendingUnlocked(store: store, rootId: rootId)
             return
         }
-        try await downloadAttachments(snapshot: latest, store: store)
+        if downloadsBodies { try await downloadAttachments(snapshot: latest, store: store) }
         var selected = try store.loadDocument(id: conflict.objectId)?.syncSnapshot ?? JSONValue.parse(conflict.localJSON).object ?? latest
         switch resolution {
         case .remote: selected = latest
@@ -179,7 +204,7 @@ extension SyncClient {
         if let returned = payload["snapshot"] { snapshot = try normalizedSnapshot(returned) }
         else { snapshot = try await fetchDocument(id: operation.objectId) }
         guard snapshot["id"]?.string == operation.objectId else { throw SyncFailure.invalidResponse }
-        try await downloadAttachments(snapshot: snapshot, store: store)
+        if downloadsBodies { try await downloadAttachments(snapshot: snapshot, store: store) }
         let conflictIDs = payload["conflictIds"]?.array?.compactMap(\.string) ?? []
         try store.applyAuthoritativeReceipt(snapshot, operation: operation, status: status, serverConflictIds: conflictIDs)
     }

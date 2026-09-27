@@ -6,12 +6,14 @@ import XCTest
 final class FullSyncReliabilityTests: XCTestCase, @unchecked Sendable {
     private let epoch = "epoch-one"
     private func temporary() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("full-sync-\(UUID().uuidString)") }
-    private func snapshot(id: String = UUID().uuidString.lowercased(), revision: Int64 = 1, body: String = "alpha\nbeta\ngamma", parent: String = "root") -> DocumentSnapshot {
-        ["id": .string(id), "revision": .integer(revision), "kind": .string("md"), "name": .string("笔记.md"), "parentId": .string(parent), "state": .string("active"), "markdownSource": .string(body), "metadata": .object([:]), "assets": .array([])]
+    private func snapshot(id: String = UUID().uuidString.lowercased(), revision: Int64 = 1, body: String = "alpha\nbeta\ngamma", parent: String = "root", kind: String = "md", name: String = "笔记.md", pdfBlobId: String? = nil) -> DocumentSnapshot {
+        var value: DocumentSnapshot = ["id": .string(id), "revision": .integer(revision), "kind": .string(kind), "name": .string(name), "parentId": .string(parent), "state": .string("active"), "markdownSource": .string(body), "metadata": .object([:]), "assets": .array([])]
+        if let pdfBlobId { value["pdfBlobId"] = .string(pdfBlobId) }
+        return value
     }
     private func response(_ data: DocumentSnapshot) throws -> String { try JSONValue.object(["data": .object(data)]).jsonString() }
-    private func page(_ items: [DocumentSnapshot], id: String, cursor: Int64, more: Bool, at: Int64 = 42) -> DocumentSnapshot {
-        ["snapshotId": .string(id), "epoch": .string(epoch), "atSeq": .integer(at), "items": .array(items.map(JSONValue.object)), "nextCursor": .string(String(cursor)), "hasMore": .bool(more)]
+    private func page(_ items: [DocumentSnapshot], id: String, cursor: Int64, more: Bool, at: Int64 = 42, libraryEpoch: String? = nil) -> DocumentSnapshot {
+        ["snapshotId": .string(id), "epoch": .string(libraryEpoch ?? epoch), "atSeq": .integer(at), "items": .array(items.map(JSONValue.object)), "nextCursor": .string(String(cursor)), "hasMore": .bool(more)]
     }
     private func freeze(_ store: DocumentStore) throws -> PendingOperation {
         try XCTUnwrap(store.prepareOperation(XCTUnwrap(store.pending().first).operationId, epoch: epoch, deviceId: "device", serverOrigin: "https://library.invalid"))
@@ -33,6 +35,116 @@ final class FullSyncReliabilityTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(healthy.stub.requests[1].url!.query!.contains("after=1"))
         let reopened = try DocumentStore(directory: root)
         XCTAssertEqual(reopened.syncCursor, 42); XCTAssertEqual(try reopened.listDocuments().count, 2)
+    }
+
+    func testCatalogPageIsReadableBeforeTheSnapshotFinishesAndSkipsFiles() async throws {
+        let root = temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try DocumentStore(directory: root)
+        let folder = snapshot(kind: "folder", name: "数学")
+        let blob = UUID().uuidString.lowercased()
+        let pdf = snapshot(body: "", kind: "pdf", name: "论文.pdf", pdfBlobId: blob)
+        let gate = DeferredResponse()
+        let id = UUID().uuidString.lowercased()
+        let connection = TestConnection([
+            .http(200, try response(page([folder], id: id, cursor: 1, more: true))),
+            .deferred(gate, 200, try response(page([pdf], id: id, cursor: 2, more: false))),
+        ], downloadsBodies: false)
+        let task = Task { try await connection.client.bootstrap(store: store, epoch: epoch) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertEqual(try store.listDocuments().count, 1)
+        XCTAssertEqual(store.syncCursor, 0)
+        XCTAssertNil(try store.syncValue("initialized"))
+        XCTAssertFalse(connection.stub.requests.contains { $0.url?.path.contains("/blobs/") == true })
+        gate.release()
+        let count = try await task.value
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(store.syncCursor, 42)
+        XCTAssertEqual(try store.syncValue("initialized"), "1")
+        XCTAssertNil(try store.loadDocument(id: XCTUnwrap(pdf["id"]?.string))?.pdfPath)
+        XCTAssertFalse(connection.stub.requests.contains { $0.url?.path.contains("/blobs/") == true })
+    }
+
+    func testCatalogFailureKeepsTheVisiblePageWithoutAdvancingTheCursor() async throws {
+        let root = temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try DocumentStore(directory: root), first = snapshot()
+        let id = UUID().uuidString.lowercased()
+        let broken = TestConnection([
+            .http(200, try response(page([first], id: id, cursor: 1, more: true))),
+            .http(410, "{}"),
+        ], downloadsBodies: false)
+        do { _ = try await broken.client.bootstrap(store: store, epoch: epoch); XCTFail("expired page must fail") } catch {}
+        XCTAssertEqual(try store.listDocuments().count, 1)
+        XCTAssertEqual(store.syncCursor, 0)
+        XCTAssertNil(try store.syncValue("initialized"))
+    }
+
+    func testFullSyncKeepsTheCatalogHiddenUntilTheFileArrives() async throws {
+        let root = temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try DocumentStore(directory: root)
+        let bytes = Data("pdf-bytes".utf8)
+        let blob = UUID().uuidString.lowercased()
+        let pdf = snapshot(body: "", kind: "pdf", name: "论文.pdf", pdfBlobId: blob)
+        let gate = DeferredResponse()
+        let id = UUID().uuidString.lowercased()
+        let connection = TestConnection([
+            .http(200, try response(page([pdf], id: id, cursor: 1, more: false))),
+            .deferred(gate, 200, String(decoding: bytes, as: UTF8.self), ["X-Content-SHA256": BlobIntegrity.sha256(bytes)]),
+        ], downloadsBodies: true)
+        let task = Task { try await connection.client.bootstrap(store: store, epoch: epoch) }
+        await fulfillment(of: [gate.started], timeout: 3)
+        XCTAssertTrue(try store.listDocuments().isEmpty)
+        XCTAssertTrue(connection.stub.requests[1].url!.path.contains("/blobs/\(blob)"))
+        gate.release()
+        let count = try await task.value
+        XCTAssertEqual(count, 1)
+        let saved = try XCTUnwrap(store.loadDocument(id: XCTUnwrap(pdf["id"]?.string)))
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: XCTUnwrap(saved.pdfPath))), bytes)
+    }
+
+    func testOpenedDocumentDownloadsOnlyItsOwnFile() async throws {
+        let root = temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try DocumentStore(directory: root), blob = UUID().uuidString.lowercased()
+        let bytes = Data("correct".utf8)
+        var doc = snapshot()
+        doc["assets"] = .array([.object(["blobId": .string(blob), "path": .string("media/\(blob).png"), "sha256": .string(BlobIntegrity.sha256(bytes)), "size": .integer(Int64(bytes.count))])])
+        let event: DocumentSnapshot = ["seq": .integer(1), "objects": .array([.object(doc)]), "deletedIds": .array([])]
+        let changes: DocumentSnapshot = ["epoch": .string(epoch), "changes": .array([.object(event)]), "nextCursor": .integer(1), "hasMore": .bool(false)]
+        let connection = TestConnection([
+            .http(200, try response(changes)),
+            .http(200, String(decoding: bytes, as: UTF8.self), ["X-Content-SHA256": BlobIntegrity.sha256(bytes)]),
+        ], downloadsBodies: false)
+        _ = try await connection.client.pullChanges(store: store, epoch: epoch)
+        XCTAssertEqual(connection.stub.requests.count, 1)
+        let document = try XCTUnwrap(store.loadDocument(id: XCTUnwrap(doc["id"]?.string)))
+        let fetched = try await connection.client.downloadOpenedDocument(document, store: store)
+        XCTAssertTrue(fetched)
+        XCTAssertEqual(connection.stub.requests.count, 2)
+        XCTAssertTrue(connection.stub.requests[1].url!.path.contains("/blobs/\(blob)"))
+        XCTAssertEqual(try Data(contentsOf: XCTUnwrap(store.assetURL(id: blob))), bytes)
+        let again = try await connection.client.downloadOpenedDocument(document, store: store)
+        XCTAssertFalse(again)
+        XCTAssertEqual(connection.stub.requests.count, 2)
+    }
+
+    func testCatalogEpochRestartKeepsUnsentEdits() async throws {
+        let root = temporary(); defer { try? FileManager.default.removeItem(at: root) }
+        let store = try DocumentStore(directory: root), initial = snapshot(revision: 10)
+        let id = try XCTUnwrap(initial["id"]?.string)
+        try store.applyRemoteBatch([initial], deletedIds: [], cursor: 100, epoch: epoch, fullSnapshot: true)
+        _ = try store.updateMarkdown(id: id, markdown: "unsent before reset")
+        _ = try freeze(store)
+        let restored = snapshot(id: id, revision: 2, body: "restored archive")
+        let connection = TestConnection([
+            .http(200, try response(page([restored], id: UUID().uuidString.lowercased(), cursor: 1, more: false, at: 5, libraryEpoch: "epoch-two"))),
+        ], downloadsBodies: false)
+        let count = try await connection.client.bootstrap(store: store, epoch: "epoch-two")
+        XCTAssertEqual(count, 1)
+        XCTAssertEqual(store.syncCursor, 5)
+        XCTAssertEqual(try store.remoteSnapshot(id: id)?["revision"]?.int64, 2)
+        XCTAssertEqual(try store.loadDocument(id: id)?.markdown, "unsent before reset")
+        let conflict = try XCTUnwrap(store.conflicts().first)
+        XCTAssertEqual(conflict.kind, "epoch_changed")
+        XCTAssertTrue(conflict.remoteJSON.contains("restored archive"))
     }
 
     func testInvalidDocumentRollsBackWholePageAndCursor() throws {

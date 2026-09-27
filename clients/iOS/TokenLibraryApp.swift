@@ -6,26 +6,48 @@ import OSLog
 @main
 struct TokenLibraryApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    private static let refreshID = "app.tokenlibrary.sync"
+    static let refreshID = "app.tokenlibrary.sync"
+    static let processingID = "app.tokenlibrary.sync.processing"
     private static let logger = Logger(subsystem:"app.tokenlibrary",category:"background-sync")
+    init() {
+        BGTaskScheduler.shared.register(forTaskWithIdentifier: Self.processingID, using: nil) { task in
+            let processing = task as! BGProcessingTask
+            let work = Task {
+                let outcome = await AppModel.synchronizeInBackground(timeBudget: .seconds(170))
+                let finished: Bool
+                switch outcome {
+                case .synchronized, .notConfigured, .noSavedSession: finished = true
+                default: finished = false
+                }
+                processing.setTaskCompleted(success: finished)
+            }
+            processing.expirationHandler = { work.cancel() }
+        }
+    }
     var body: some Scene {
         WindowGroup { TokenLibraryRoot() }
             .backgroundTask(.appRefresh(Self.refreshID)) {
-                await backgroundSync()
-                await scheduleRefresh()
+                await backgroundSync(timeBudget: .seconds(25))
+                Self.scheduleBackgroundSync()
             }
             .onChange(of:scenePhase) { _,phase in
-                if phase == .background { scheduleRefresh() }
+                if phase == .background { Self.scheduleBackgroundSync() }
             }
     }
-    private func scheduleRefresh() {
-        let request=BGAppRefreshTaskRequest(identifier:Self.refreshID)
-        request.earliestBeginDate=Date(timeIntervalSinceNow:15*60)
-        do { try BGTaskScheduler.shared.submit(request) }
-        catch { Self.logger.info("Background refresh was not scheduled: \(error.localizedDescription,privacy:.public)") }
+    nonisolated static func scheduleBackgroundSync() {
+        let refresh = BGAppRefreshTaskRequest(identifier: refreshID)
+        refresh.earliestBeginDate = Date(timeIntervalSinceNow: 60)
+        let processing = BGProcessingTaskRequest(identifier: processingID)
+        processing.requiresNetworkConnectivity = true
+        processing.requiresExternalPower = false
+        processing.earliestBeginDate = Date(timeIntervalSinceNow: 60)
+        for request in [refresh as BGTaskRequest, processing] {
+            do { try BGTaskScheduler.shared.submit(request) }
+            catch { logger.info("Background sync was not scheduled: \(error.localizedDescription,privacy:.public)") }
+        }
     }
-    @MainActor private func backgroundSync() async {
-        switch await AppModel.synchronizeInBackground() {
+    @MainActor private func backgroundSync(timeBudget: Duration) async {
+        switch await AppModel.synchronizeInBackground(timeBudget: timeBudget) {
         case .synchronized:
             Self.logger.info("Background sync completed.")
         case .cancelled:

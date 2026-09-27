@@ -92,6 +92,18 @@ extension DocumentStore {
         return asset
     }
 
+    /// Records a file fetched on demand. This is not an edit and is not uploaded.
+    public func rememberLocalPDFPath(id: String, path: String) throws {
+        let url = try resolveAttachment(path: path)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw TransferError.missingFile }
+        try db.write { db in
+            try db.execute(sql: "UPDATE working_documents SET pdf_path=? WHERE id=?", arguments: [url.path, id])
+            if let row = try Row.fetchOne(db, sql: "SELECT * FROM working_documents WHERE id=?", arguments: [id]) {
+                try reindex(mapDoc(row), db: db)
+            }
+        }
+    }
+
     public func installAttachment(data: Data, asset: LibraryAsset, state: String = "complete") throws {
         guard UUID(uuidString: asset.blobId) != nil, Int64(data.count) == asset.size else { throw TransferError.hashMismatch }
         guard asset.path.hasPrefix("media/"), !asset.path.hasPrefix("/"), !asset.path.contains("\\") else { throw TransferError.invalidPath }

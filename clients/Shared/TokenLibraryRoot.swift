@@ -1,6 +1,9 @@
 import SwiftUI
 import Combine
 import LibraryCore
+#if os(iOS)
+import UIKit
+#endif
 import PDFKit
 import WebKit
 import UniformTypeIdentifiers
@@ -40,10 +43,28 @@ enum LibraryVerificationConfiguration {
     }
 }
 
+private func libraryConnectedClient(url: URL, deviceId: String) -> SyncClient {
+    #if os(iOS)
+    let downloadsBodies = false
+    #else
+    let downloadsBodies = true
+    #endif
+    return SyncClient(baseURL: url, deviceId: deviceId, deviceName: DeviceIdentity.name, platform: DeviceIdentity.platform, downloadsBodies: downloadsBodies)
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     /// Cloud library on mycloud. A previously saved address replaces it.
     static let defaultServerAddress = "http://123.58.215.34"
+    #if os(iOS)
+    static let connectedSyncBanner = "已连接，正在同步目录…"
+    static let syncFinishedBanner = "目录已同步。打开某一本时再下载文件。"
+    static func syncIdleLine(_ at: Date) -> String { "目录已同步 · \(at.formatted(date: .omitted, time: .shortened))。文件在打开时下载。" }
+    #else
+    static let connectedSyncBanner = "已连接，正在同步资料与附件…"
+    static let syncFinishedBanner = "资料与附件已同步。"
+    static func syncIdleLine(_ at: Date) -> String { "已和服务器同步 · \(at.formatted(date: .omitted, time: .shortened))" }
+    #endif
     struct SourceReturnContext { let noteID:String;let sourceID:String }
     // A Debug-only isolated directory lets UI smoke tests avoid the user's library.
     private static var verificationDirectory: URL? {
@@ -103,6 +124,7 @@ final class AppModel: ObservableObject {
     @Published var searchPresented = false
     @Published var searchResults:[LibrarySearchHit]=[]
     @Published var searchTruncated=false
+    @Published var openDownloadError: String?
     @Published var searching=false
     @Published var searchCoverage:LibrarySearchCoverage?
     @Published var navigationSearch=""
@@ -138,7 +160,7 @@ final class AppModel: ObservableObject {
 
     init(directory explicitDirectory:URL?=nil,preferences suppliedPreferences:UserDefaults?=nil,restoreSavedSession:Bool=true,
          credentials: (any SessionCredentialStore)? = nil,
-         makeClient: @escaping @Sendable (URL, String) -> SyncClient = { SyncClient(baseURL: $0, deviceId: $1) }) throws {
+         makeClient: @escaping @Sendable (URL, String) -> SyncClient = { libraryConnectedClient(url: $0, deviceId: $1) }) throws {
         let preferences=suppliedPreferences ?? Self.defaultPreferences
         self.preferences=preferences
         appearanceStore=AppearanceStore(defaults:preferences)
@@ -420,7 +442,7 @@ final class AppModel: ObservableObject {
                                         preferences suppliedPreferences:UserDefaults?=nil,
                                         credentials suppliedCredentials:(any SessionCredentialStore)?=nil,
                                         credentialWait:Duration = .seconds(3), timeBudget:Duration = .seconds(25),
-                                        makeClient:@escaping @Sendable (URL,String)->SyncClient = { SyncClient(baseURL:$0,deviceId:$1) }) async -> BackgroundSyncOutcome {
+                                        makeClient:@escaping @Sendable (URL,String)->SyncClient = { libraryConnectedClient(url:$0, deviceId:$1) }) async -> BackgroundSyncOutcome {
         let preferences=suppliedPreferences ?? defaultPreferences
         guard let rawServer=preferences.string(forKey:"connection.server"),let server=try? ServerAddress.normalize(rawServer),
               let libraryID=preferences.string(forKey:"connection.libraryId"),!libraryID.isEmpty,
@@ -577,7 +599,7 @@ final class AppModel: ObservableObject {
             offlineAccess = true
             currentFolder = r.rootId
             folderName = "资料库"
-            setConnectionBanner("已连接，正在同步资料与附件…")
+            setConnectionBanner(Self.connectedSyncBanner)
             reload()
             requestSync()
         } catch is CancellationError {
@@ -630,6 +652,39 @@ final class AppModel: ObservableObject {
         catalogPresented=false;renameTarget=nil;moveTarget=nil;sourceReturnContext=nil
     }
 
+    func documentNeedsLocalFile(_ document: LibraryDocument) -> Bool {
+        if document.kind == .pdf {
+            guard document.pdfBlobId != nil else { return false }
+            return !(document.pdfPath.map { FileManager.default.fileExists(atPath: $0) } ?? false)
+        }
+        guard document.kind == .md, let assets = try? JSONValue.parse(document.assetsJSON).array else { return false }
+        for value in assets {
+            guard let asset = value.object, asset["blobId"]?.string ?? asset["id"]?.string != nil,
+                  let path = asset["path"]?.string else { continue }
+            guard let file = try? store.resolveAttachment(path: path), FileManager.default.fileExists(atPath: file.path) else { return true }
+        }
+        return false
+    }
+
+    func materializeOpenedDocument(_ id: String) async {
+        openDownloadError = nil
+        guard let doc = try? store.loadDocument(id: id), documentNeedsLocalFile(doc) else { return }
+        guard let client else {
+            openDownloadError = "登录后才能从服务器下载这一本。"
+            return
+        }
+        do {
+            _ = try await client.downloadOpenedDocument(doc, store: store)
+            reload()
+            if let current = try? store.loadDocument(id: id), documentNeedsLocalFile(current) {
+                openDownloadError = "文件没有保存到手机上。"
+            }
+        } catch {
+            openDownloadError = error.localizedDescription
+            reportLocal("下载", error: error)
+        }
+    }
+
     func requestSync() {
         guard let activeClient=client, !isLocalWorkspace else { reload();return }
         syncRequested = true
@@ -647,12 +702,16 @@ final class AppModel: ObservableObject {
                 do {
                     try await Task.sleep(for: .milliseconds(500))
                     guard activeClient === client,activeStore === store,!isLocalWorkspace else { return }
+                    activeClient.onLibraryPage = { [weak self] in
+                        Task { @MainActor in self?.reload() }
+                    }
                     let result = try await activeClient.synchronize(store:activeStore,rootId:rootID)
                     try Task.checkCancellation()
                     guard activeStore === store,activeClient === client,syncRunID == runID else { return }
                     connectionError=nil;recordSuccessfulSync()
                     let remaining=try activeStore.pending().count
-                    setConnectionBanner(result.conflicts>0 ? "同步完成，存在需要处理的冲突。" : (remaining == 0 ? "资料与附件已同步。" : "已同步本轮更改，其余内容等待下一轮。"))
+                    let finished = remaining == 0 ? Self.syncFinishedBanner : "已同步本轮更改，其余内容等待下一轮。"
+                    setConnectionBanner(result.conflicts>0 ? "同步完成，存在需要处理的冲突。" : finished)
                     reload()
                 } catch is CancellationError { return }
                 catch {
@@ -681,6 +740,20 @@ final class AppModel: ObservableObject {
     var workspaceStatusTitle:String {
         if isLocalWorkspace { return "这台设备" }
         return session == nil ? "资料库（离线）" : "资料库"
+    }
+
+    var syncStatusLine: String {
+        if session == nil || isLocalWorkspace { return "未登录，这台设备不会和服务器同步" }
+        if syncing {
+            #if os(iOS)
+            return "正在同步目录。文件要等打开某一本时再下载。"
+            #else
+            return "正在和服务器同步…"
+            #endif
+        }
+        if connectionError != nil { return "同步没有完成，可在设置里再试一次" }
+        if let at = lastSyncAt { return Self.syncIdleLine(at) }
+        return "已登录，等待和服务器同步"
     }
 
     private func validName(_ name:String)->Bool { FileNames.isValidStoredName(name) }
@@ -930,10 +1003,34 @@ final class AppModel: ObservableObject {
     }
 }
 
+#if os(iOS)
+private final class BackgroundSyncLease {
+    nonisolated(unsafe) static let shared = BackgroundSyncLease()
+    private var id: UIBackgroundTaskIdentifier = .invalid
+    var active: Bool { id != .invalid }
+    func begin() {
+        guard id == .invalid else { return }
+        id = UIApplication.shared.beginBackgroundTask(withName: "TokenLibrary.sync") {
+            BackgroundSyncLease.shared.end()
+            TokenLibraryApp.scheduleBackgroundSync()
+        }
+    }
+    func end() {
+        guard id != .invalid else { return }
+        let current = id
+        id = .invalid
+        UIApplication.shared.endBackgroundTask(current)
+    }
+}
+#endif
+
 public struct TokenLibraryRoot: View {
     @State private var model: AppModel?
     @State private var startupError: String?
     @Environment(\.scenePhase) private var scenePhase
+    #if os(iOS)
+    @State private var backgroundLoop: Task<Void, Never>?
+    #endif
     private let syncTimer = Timer.publish(every: 20, on: .main, in: .common).autoconnect()
     public init() {}
     public var body: some View {
@@ -947,9 +1044,36 @@ public struct TokenLibraryRoot: View {
             } else { ProgressView("正在打开资料库…") }
         }
         .task { if model == nil { initialize() }; model?.requestSync() }
-        .onChange(of: scenePhase) { _, phase in if phase == .active { model?.reload(); model?.requestSync() } }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                stopBackgroundSync()
+                model?.reload(); model?.requestSync()
+            } else {
+                startBackgroundSync()
+            }
+        }
         .onReceive(syncTimer) { _ in if scenePhase == .active { model?.requestSync() } }
     }
+    #if os(iOS)
+    private func startBackgroundSync() {
+        BackgroundSyncLease.shared.begin()
+        guard BackgroundSyncLease.shared.active, backgroundLoop == nil else { return }
+        backgroundLoop = Task { @MainActor in
+            while !Task.isCancelled && BackgroundSyncLease.shared.active {
+                model?.requestSync()
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
+    }
+    private func stopBackgroundSync() {
+        backgroundLoop?.cancel()
+        backgroundLoop = nil
+        BackgroundSyncLease.shared.end()
+    }
+    #else
+    private func startBackgroundSync() {}
+    private func stopBackgroundSync() {}
+    #endif
     private func initialize() {
         do { model = try AppModel();startupError=nil }
         catch { startupError="\(error.localizedDescription)\n原文件仍保留。请检查磁盘空间和目录权限后重试。" }
@@ -1169,7 +1293,14 @@ struct LibraryView: View {
             .onChange(of: model.query) { _, _ in shownFolders = 24; shownBooks = 48 }
             .overlay {
                 if model.visibleDocs().isEmpty && unresolvedRows.isEmpty {
-                    if model.searching { ProgressView("正在搜索…") }
+                    if model.syncing && !model.isLocalWorkspace {
+                        VStack(spacing: 12) {
+                            ProgressView()
+                            Text("正在同步目录…").font(.headline)
+                            Text("书会随着目录出现。PDF 和图片要等打开某一本再下载。")
+                                .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }.padding(24)
+                    } else if model.searching { ProgressView("正在搜索…") }
                     else {
                         ContentUnavailableView {
                             VStack(spacing: 14) {
@@ -1370,14 +1501,29 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func readingSurface(_ document: LibraryDocument) -> some View {
+        let needsFile = model.documentNeedsLocalFile(document)
         Group {
-            if document.kind == .pdf {
+            if needsFile {
+                VStack(spacing: 12) {
+                    if let message = model.openDownloadError {
+                        Text("这一本没有下载下来。").font(.headline)
+                        Text(message).font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        Button("重试") { Task { await model.materializeOpenedDocument(document.id) } }
+                            .buttonStyle(InkButtonStyle())
+                    } else {
+                        ProgressView()
+                        Text("正在下载这一本…").font(.subheadline)
+                    }
+                }
+                .padding(24)
+            } else if document.kind == .pdf {
                 PDFReaderView(documentId: document.id, model: model, store: model.store)
             } else {
                 EditorScreen(docId: document.id, model: model, store: model.store)
             }
         }
         .id(model.store.root.path + "/" + document.id)
+        .task(id: document.id) { await model.materializeOpenedDocument(document.id) }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(LibraryPalette.paper)
         .toolbar {
@@ -1434,6 +1580,7 @@ struct LibraryView: View {
 
     private var shelfCaption: some View {
         VStack(alignment: .leading, spacing: 6) {
+            Text(model.syncStatusLine)
             if model.searchTruncated {
                 Text("只列出前 1000 本。换一个更具体的词，才能看到其余的。")
             } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -1512,6 +1659,12 @@ struct LibraryView: View {
         .accessibilityHint("展开这个文件夹")
     }
 
+    private func bookAvailability(_ doc: LibraryDocument) -> String {
+        guard doc.kind == .pdf else { return "笔记" }
+        if let path = doc.pdfPath, FileManager.default.fileExists(atPath: path) { return "PDF" }
+        return "PDF · 未下载"
+    }
+
     private func bookCard(_ doc: LibraryDocument) -> some View {
         let excerpt = model.query.isEmpty ? nil : model.searchResults.first(where: { $0.objectId == doc.id })?.excerpt
         return Button {
@@ -1531,7 +1684,7 @@ struct LibraryView: View {
                     if let excerpt {
                         Text(excerpt).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                     }
-                    Text(doc.kind == .pdf ? "PDF" : "笔记")
+                    Text(bookAvailability(doc))
                         .font(.caption2.weight(.semibold))
                         .foregroundStyle(LibraryPalette.ink.opacity(0.7))
                 }
@@ -1915,7 +2068,7 @@ struct PDFReaderView: View {
         handle.view?.clearSelection();searchMatches=[];matchIndex=0
         pdfDoc=nil;originalTextIndex=nil;fileHash=nil;loadedSourceID="";hint="";pageInputError=nil
         guard let document,let path=document.pdfPath,let pdf=PDFDocument(url:URL(fileURLWithPath:path)),!pdf.isLocked,pdf.pageCount>0 else {
-            readingState=PDFReadingState();hint="PDF 尚未下载完成或本机文件不可用，请重试同步。";return
+            readingState=PDFReadingState();hint="这一本的文件还不在手机上。返回资料库后再打开一次。";return
         }
         originalTextIndex=PDFOriginalTextIndex(document:pdf)
         fileHash=try? DocumentStore.catalogFileHash(URL(fileURLWithPath:path))
@@ -2191,7 +2344,7 @@ struct SettingsView: View {
                 Text("资料先保存到本机；联网时自动同步。维护或连接失败时可继续编辑。")
                     .font(.caption).foregroundStyle(.secondary)
                 if model.session != nil {
-                    Button("现在同步一次") { model.requestSync() }.disabled(model.syncing)
+                    Button(model.syncing ? "正在同步…" : "现在同步一次") { model.requestSync() }.disabled(model.syncing)
                 }
             }
         }

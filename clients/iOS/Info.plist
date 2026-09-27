@@ -48,10 +48,12 @@
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
 		<string>app.tokenlibrary.sync</string>
+		<string>app.tokenlibrary.sync.processing</string>
 	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>
+		<string>processing</string>
 	</array>
 </dict>
 </plist>

@@ -52,6 +52,56 @@ extension DocumentStore {
         }
     }
 
+    /// Makes one snapshot page readable before the frozen snapshot is finished.
+    /// The cursor stays put until `finishRemoteSnapshot`, so a cancelled download
+    /// cannot skip the pages that have not arrived.
+    public func applyRemoteSnapshotPage(_ snapshots: [DocumentSnapshot]) throws {
+        try db.write { db in
+            for snapshot in snapshots { try applyPulled(snapshot, db: db) }
+        }
+    }
+
+    /// A restored server may reuse lower revisions. Dropping the previous remote
+    /// rows lets those snapshots replace the old ones; unsent edits stay local
+    /// and become an epoch conflict. The cursor is unchanged until the new
+    /// snapshot is complete.
+    public func prepareEpochChange(_ epoch: String) throws -> Bool {
+        try db.write { db in
+            guard let previousEpoch = try String.fetchOne(db, sql: "SELECT value FROM sync_state WHERE key='epoch'"), previousEpoch != epoch else { return false }
+            let changed = try Row.fetchAll(db, sql: "SELECT DISTINCT d.* FROM working_documents d JOIN pending_operations p ON p.object_id=d.id WHERE p.state IN ('pending','awaiting_remote','needs_edit')")
+            for row in changed {
+                let document = mapDoc(row)
+                let open = try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM sync_conflicts WHERE object_id=? AND kind='epoch_changed' AND state='open'", arguments: [document.id]) ?? 0
+                if open == 0 {
+                    let base = try String.fetchOne(db, sql: "SELECT snapshot_json FROM remote_documents WHERE id=?", arguments: [document.id]).flatMap { try JSONValue.parse($0).object } ?? [:]
+                    try recordConflict(objectId: document.id, kind: "epoch_changed", base: base, local: document.syncSnapshot, remote: ["id": .string(document.id), "state": .string("purged")], revision: 0, db: db)
+                }
+            }
+            try db.execute(sql: "DELETE FROM remote_documents")
+            return true
+        }
+    }
+
+    public func adoptEpochConflictRemotes(_ snapshots: [DocumentSnapshot]) throws {
+        try db.write { db in
+            for snapshot in snapshots {
+                guard let id = snapshot["id"]?.string, let revision = snapshot["revision"]?.int64 else { continue }
+                try db.execute(sql: "UPDATE sync_conflicts SET remote_json=?, revision=? WHERE object_id=? AND kind='epoch_changed' AND state='open'",
+                               arguments: [try JSONValue.object(snapshot).jsonString(), revision, id])
+            }
+        }
+    }
+
+    public func finishRemoteSnapshot(presentIds: Set<String>, cursor: Int64, epoch: String) throws {
+        try db.write { db in
+            let known = Set(try String.fetchAll(db, sql: "SELECT id FROM remote_documents"))
+            for id in known.subtracting(presentIds) { try applyTombstone(id, db: db) }
+            for (key, value) in [("cursor", String(cursor)), ("epoch", epoch), ("initialized", "1")] {
+                try db.execute(sql: "INSERT OR REPLACE INTO sync_state(key,value) VALUES (?,?)", arguments: [key, value])
+            }
+        }
+    }
+
     /// All documents, tombstones, indexes and the cursor for this page commit together.
     public func applyRemoteBatch(_ snapshots: [DocumentSnapshot], deletedIds: [String], cursor: Int64, epoch: String, fullSnapshot: Bool = false) throws {
         try db.write { db in

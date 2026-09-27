@@ -20,6 +20,11 @@ public final class SyncClient: @unchecked Sendable {
     public var sessionToken: String?
     public var epoch: String?
     public var deviceId: String
+    public var deviceName: String
+    public var platform: String
+    /// iPhone keeps the catalog only. The file is fetched when that document is opened.
+    public var downloadsBodies: Bool
+    public var onLibraryPage: (@Sendable () -> Void)?
     public var libraryId: String?
     public var rootId: String?
     private let session: URLSession
@@ -27,13 +32,20 @@ public final class SyncClient: @unchecked Sendable {
     private let retryPolicy: SyncRetryPolicy
     private let sleep: @Sendable (TimeInterval) async throws -> Void
 
-    public init(baseURL: URL, deviceId: String = UUID().uuidString.lowercased(), session: URLSession = .shared,
+    public init(baseURL: URL, deviceId: String = UUID().uuidString.lowercased(), deviceName: String = "client", platform: String = "swift", downloadsBodies: Bool? = nil, session: URLSession = .shared,
                 requestTimeout: TimeInterval = 15, retryPolicy: SyncRetryPolicy = SyncRetryPolicy(),
                 sleep: @escaping @Sendable (TimeInterval) async throws -> Void = { delay in
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }) {
         self.baseURL = baseURL
         self.deviceId = deviceId
+        self.deviceName = deviceName
+        self.platform = platform
+        #if os(iOS)
+        self.downloadsBodies = downloadsBodies ?? false
+        #else
+        self.downloadsBodies = downloadsBodies ?? true
+        #endif
         self.session = session
         self.requestTimeout = requestTimeout.isFinite ? min(max(requestTimeout, 0.1), 60) : 15
         self.retryPolicy = retryPolicy
@@ -54,7 +66,7 @@ public final class SyncClient: @unchecked Sendable {
     public func login(username: String, password: String) async throws -> LoginResult {
         let body: [String: String] = [
             "username": username, "password": password,
-            "deviceId": deviceId, "deviceName": "client", "platform": "swift",
+            "deviceId": deviceId, "deviceName": deviceName, "platform": platform,
         ]
         let data = try await post(path: "/api/v1/auth/login", json: body, auth: false)
         struct Envelope: Decodable { let data: LoginResult }
@@ -116,7 +128,7 @@ public final class SyncClient: @unchecked Sendable {
                       envelope["epoch"]?.string == epoch, envelope["deviceId"]?.string == deviceId,
                       queued.requestOrigin == origin else { throw StoreError.operationContextChanged }
                 let snapshot = try await fetchDocument(id: queued.objectId)
-                try await downloadAttachments(snapshot: snapshot, store: store)
+                if downloadsBodies { try await downloadAttachments(snapshot: snapshot, store: store) }
                 try store.applyAuthoritativeReceipt(snapshot, operation: queued, status: "committed")
                 continue
             }
@@ -197,6 +209,10 @@ public final class SyncClient: @unchecked Sendable {
             req.setValue("Bearer \(t)", forHTTPHeaderField: "Authorization")
         }
         if auth, let e = epoch { req.setValue(e, forHTTPHeaderField: "X-Library-Epoch") }
+        if auth {
+            req.setValue(platform, forHTTPHeaderField: "X-Device-Platform")
+            req.setValue(deviceName, forHTTPHeaderField: "X-Device-Name")
+        }
         return req
     }
 

@@ -307,7 +307,7 @@ final class ConnectionReliabilityTests: XCTestCase, @unchecked Sendable {
 enum StubResponse {
     case http(Int, String, [String: String] = [:])
     case error(URLError)
-    case deferred(DeferredResponse, Int, String)
+    case deferred(DeferredResponse, Int, String, [String: String] = [:])
 }
 
 final class DeferredResponse: @unchecked Sendable {
@@ -375,8 +375,8 @@ private final class ConnectionURLProtocol: URLProtocol, @unchecked Sendable {
             respond(url: url, code: code, body: body, headers: headers)
         case let .error(error):
             client?.urlProtocol(self, didFailWithError: error)
-        case let .deferred(gate, code, body):
-            gate.register { self.respond(url: url, code: code, body: body, headers: [:]) }
+        case let .deferred(gate, code, body, headers):
+            gate.register { self.respond(url: url, code: code, body: body, headers: headers) }
         }
     }
     private func respond(url: URL, code: Int, body: String, headers: [String: String]) {
@@ -393,7 +393,7 @@ final class TestConnection: @unchecked Sendable {
     let client: SyncClient
     private let host: String
     let session: URLSession
-    init(_ responses: [StubResponse], timeout: TimeInterval = 15, cancelSleep: Bool = false) {
+    init(_ responses: [StubResponse], timeout: TimeInterval = 15, cancelSleep: Bool = false, downloadsBodies: Bool? = nil) {
         let stub = LockedStub(responses)
         self.stub = stub
         host = UUID().uuidString.lowercased() + ".invalid"
@@ -401,7 +401,7 @@ final class TestConnection: @unchecked Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ConnectionURLProtocol.self]
         session = URLSession(configuration: configuration)
-        client = SyncClient(baseURL: URL(string: "https://\(host)")!, session: session, requestTimeout: timeout, sleep: { delay in
+        client = SyncClient(baseURL: URL(string: "https://\(host)")!, downloadsBodies: downloadsBodies, session: session, requestTimeout: timeout, sleep: { delay in
             stub.recordSleep(delay)
             if cancelSleep { throw CancellationError() }
             try Task.checkCancellation()

@@ -41,6 +41,33 @@ extension SyncClient {
         try store.updateTransfer(asset, uploadId: uploadId, state: "complete")
     }
 
+    /// Fetches only the opened document's file. Catalog sync does not call this when
+    /// `downloadsBodies` is false. Returns whether any bytes were written.
+    @discardableResult
+    public func downloadOpenedDocument(_ document: LibraryDocument, store: DocumentStore) async throws -> Bool {
+        var fetched = false
+        if document.kind == .pdf, let blob = document.pdfBlobId {
+            let ready = document.pdfPath.map { FileManager.default.fileExists(atPath: $0) } ?? false
+            if !ready {
+                let asset = try await downloadBlob(id: blob, path: "media/\(blob).pdf", expectedHash: nil, expectedSize: nil, mime: "application/pdf", store: store)
+                let url = try store.resolveAttachment(path: asset.path)
+                try store.rememberLocalPDFPath(id: document.id, path: url.path)
+                fetched = true
+            }
+        }
+        if document.kind == .md, let assets = try? JSONValue.parse(document.assetsJSON).array {
+            for value in assets {
+                guard let asset = value.object, let blob = asset["blobId"]?.string ?? asset["id"]?.string,
+                      let path = asset["path"]?.string else { continue }
+                let file = try store.resolveAttachment(path: path)
+                if FileManager.default.fileExists(atPath: file.path) { continue }
+                _ = try await downloadBlob(id: blob, path: path, expectedHash: asset["sha256"]?.string, expectedSize: asset["size"]?.int64, mime: asset["mime"]?.string ?? DocumentStore.mime(for: path), store: store)
+                fetched = true
+            }
+        }
+        return fetched
+    }
+
     func downloadAttachments(snapshot: DocumentSnapshot, store: DocumentStore) async throws {
         if let blobId = snapshot["pdfBlobId"]?.string {
             _ = try await downloadBlob(id: blobId, path: "media/\(blobId).pdf", expectedHash: nil, expectedSize: nil, mime: "application/pdf", store: store)
