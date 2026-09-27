@@ -36,7 +36,7 @@
 | 来源 | 现在的行为 | 测试 |
 | --- | --- | --- |
 | 技术方案 4.7 | 已登录连接升级为 WebSocket。服务器发送 `changes_available`，只含 epoch 和最新序号，并回答 ping。断开后重连仍能收到后续通知。通知丢失时 `GET /api/v1/sync/changes` 仍能拉到期间的变更。 | `go test -count=1 ./internal/api -run TestChangesAvailableDoesNotReplaceHTTPPull` |
-| 技术方案 8.1 | 同一地址 15 分钟内最多 10 次登录失败。同时最多两次口令校验，超出的请求返回 429，不把账号永久锁死。 | `go test -count=1 ./internal/api -run TestServerContractGaps` 与 `go test -count=1 ./internal/authn -run TestLoginGateRejectsExcessFailuresAndConcurrentVerifies` |
+| 技术方案 8.1 | 同一连接地址 15 分钟内最多 10 次登录失败。未配置 `TRUSTED_PROXY_CIDRS` 时不采用 `X-Forwarded-For` 或 `X-Real-IP`。同时最多两次口令校验，超出的请求返回 429，不把账号永久锁死。 | `go test -count=1 ./internal/api -run 'TestServerContractGaps|TestLoginLimitUsesTheConnectionPeer'` 与 `go test -count=1 ./internal/authn -run TestLoginGateRejectsExcessFailuresAndConcurrentVerifies` |
 | 技术方案 7.2 | `POST /api/v1/blobs/{id}/repair` 只接受状态为 `unavailable`、且字节与原哈希和大小一致的内容。不一致时不改状态。 | 同上 `TestServerContractGaps` |
 | 技术方案 7.1 | 服务端识别 PDF 头和 `/Encrypt`。需要打开密码的文件在 `blobs.password_required` 标为真。客户端仍会在导入前拒绝这类文件。本环境没有把 qpdf 当作必须的外部进程。 | `go test -count=1 ./internal/pdfcheck -run TestPasswordProtectedPDFIsMarked` 与 `TestServerContractGaps` |
 

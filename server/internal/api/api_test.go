@@ -514,7 +514,9 @@ func TestServerContractGaps(t *testing.T) {
 	uploadBody := fmt.Sprintf(`{"blobId":%q,"size":%d,"sha256":%q,"mime":"application/pdf"}`, blob, len(locked), hex.EncodeToString(hash[:]))
 	created := post(t, freshTS.URL+"/api/v1/uploads", uploadBody, login.Data.SessionToken, login.Data.Epoch, "")
 	var upload struct {
-		Data struct{ UploadID string `json:"uploadId"` } `json:"data"`
+		Data struct {
+			UploadID string `json:"uploadId"`
+		} `json:"data"`
 	}
 	mustJSON(t, read(t, created), &upload)
 	chunk := putBytes(t, freshTS.URL+"/api/v1/uploads/"+upload.Data.UploadID+"/chunks/0", locked, login.Data.SessionToken, login.Data.Epoch)
@@ -563,6 +565,49 @@ func putBytes(t *testing.T, url string, body []byte, tok, epoch string) *http.Re
 		t.Fatal(err)
 	}
 	return res
+}
+
+func TestLoginLimitUsesTheConnectionPeer(t *testing.T) {
+	st, cfg := testdb.Start(t)
+	defer st.Close()
+	if len(cfg.TrustedProxyCIDRs) != 0 {
+		t.Fatal("default config must not trust forwarded client addresses")
+	}
+	ts := httptest.NewServer(api.New(cfg, st, &jobs.Runner{S: st}))
+	defer ts.Close()
+	body := fmt.Sprintf(`{"username":"token","password":"wrong-password","deviceId":%q,"deviceName":"t","platform":"mac"}`, uuid.NewString())
+	for i := 0; i < authn.LoginFailureLimit; i++ {
+		req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/login", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", i+1))
+		req.Header.Set("X-Real-IP", fmt.Sprintf("198.51.100.%d", i+1))
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := read(t, res)
+		if res.StatusCode != 401 {
+			t.Fatalf("forwarded failure %d: %d %s", i+1, res.StatusCode, got)
+		}
+	}
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/v1/auth/login", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Forwarded-For", "203.0.113.200")
+	req.Header.Set("X-Real-IP", "198.51.100.200")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited := read(t, res)
+	if res.StatusCode != 429 || !strings.Contains(limited, "RATE_LIMITED") {
+		t.Fatalf("rotated forwarding headers escaped the peer limit: %d %s", res.StatusCode, limited)
+	}
 }
 
 func TestChangesAvailableDoesNotReplaceHTTPPull(t *testing.T) {

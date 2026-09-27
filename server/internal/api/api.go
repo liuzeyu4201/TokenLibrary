@@ -40,6 +40,15 @@ type Server struct {
 func New(cfg config.Config, s *store.Store, j *jobs.Runner) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	// ASVS V2.4 / V6.3: gin trusts every proxy unless this list is explicit.
+	// An empty list keeps the TCP peer as the login-attempt key.
+	proxies := cfg.TrustedProxyCIDRs
+	if len(proxies) == 0 {
+		proxies = nil
+	}
+	if err := r.SetTrustedProxies(proxies); err != nil {
+		_ = r.SetTrustedProxies(nil)
+	}
 	r.Use(gin.Recovery())
 	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j, Logins: authn.NewLoginGate(time.Now), Hub: newChangeHub()}
 
@@ -171,6 +180,7 @@ func (s *Server) login(c *gin.Context) {
 		c.JSON(422, errBody(c, "VALIDATION", "body", false))
 		return
 	}
+	// ClientIP uses X-Forwarded-For only after SetTrustedProxies names that peer.
 	if err := s.Logins.Acquire(c.ClientIP()); err != nil {
 		if errors.Is(err, authn.ErrVerifyBusy) {
 			c.Header("Retry-After", "1")
