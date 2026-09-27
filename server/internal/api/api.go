@@ -23,22 +23,24 @@ import (
 	"tokenlibrary/internal/config"
 	"tokenlibrary/internal/jobs"
 	"tokenlibrary/internal/names"
+	"tokenlibrary/internal/pdfcheck"
 	"tokenlibrary/internal/store"
 	"tokenlibrary/internal/synceng"
 )
 
 type Server struct {
-	Cfg config.Config
-	S   *store.Store
-	E   *synceng.Engine
-	J   *jobs.Runner
+	Cfg    config.Config
+	S      *store.Store
+	E      *synceng.Engine
+	J      *jobs.Runner
+	Logins *authn.LoginGate
 }
 
 func New(cfg config.Config, s *store.Store, j *jobs.Runner) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j}
+	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j, Logins: authn.NewLoginGate(time.Now)}
 
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 	r.GET("/health/ready", sv.ready)
@@ -63,6 +65,7 @@ func New(cfg config.Config, s *store.Store, j *jobs.Runner) *gin.Engine {
 	v1.PUT("/uploads/:id/chunks/:index", sv.requireSession, sv.writeGuard, sv.putChunk)
 	v1.POST("/uploads/:id/complete", sv.requireSession, sv.writeGuard, sv.completeUpload)
 	v1.GET("/blobs/:id", sv.requireSession, sv.getBlob)
+	v1.POST("/blobs/:id/repair", sv.requireSession, sv.writeGuard, sv.repairBlob)
 	v1.GET("/imports/meta", sv.requireUpload, sv.importMeta)
 	v1.POST("/imports", sv.requireUpload, sv.writeGuard, sv.importFile)
 	v1.GET("/imports/:operationId", sv.requireUpload, sv.importStatus)
@@ -167,7 +170,19 @@ func (s *Server) login(c *gin.Context) {
 		c.JSON(422, errBody(c, "VALIDATION", "body", false))
 		return
 	}
-	if req.Username != s.Cfg.AdminUsername || !authn.VerifyPassword(s.Cfg.AdminPasswordHash, req.Password) {
+	if err := s.Logins.Acquire(c.ClientIP()); err != nil {
+		if errors.Is(err, authn.ErrVerifyBusy) {
+			c.Header("Retry-After", "1")
+			c.JSON(429, errBody(c, "BUSY", "password verification busy", true))
+			return
+		}
+		c.Header("Retry-After", "900")
+		c.JSON(429, errBody(c, "RATE_LIMITED", "too many login attempts", false))
+		return
+	}
+	ok := req.Username == s.Cfg.AdminUsername && authn.VerifyPassword(s.Cfg.AdminPasswordHash, req.Password)
+	s.Logins.Release(c.ClientIP(), !ok)
+	if !ok {
 		c.JSON(401, errBody(c, "UNAUTHORIZED", "invalid credentials", false))
 		return
 	}
@@ -562,7 +577,8 @@ func (s *Server) importFile(c *gin.Context) {
 			c.JSON(500, errBody(c, "INTERNAL", "blob write", false))
 			return
 		}
-		if _, err = conn.Exec(c, `INSERT INTO blobs(id,library_id,sha256,size,mime,state) VALUES($1,$2,$3,$4,$5,'ready') ON CONFLICT(id) DO UPDATE SET state='ready'`, bid, s.S.LibID, sum[:], len(body), mime); err != nil {
+		passwordRequired := mime == "application/pdf" && pdfcheck.Classify(body).PasswordRequired
+		if _, err = conn.Exec(c, `INSERT INTO blobs(id,library_id,sha256,size,mime,state,password_required) VALUES($1,$2,$3,$4,$5,'ready',$6) ON CONFLICT(id) DO UPDATE SET state='ready', password_required=EXCLUDED.password_required`, bid, s.S.LibID, sum[:], len(body), mime, passwordRequired); err != nil {
 			c.JSON(500, errBody(c, "INTERNAL", "blob record", false))
 			return
 		}

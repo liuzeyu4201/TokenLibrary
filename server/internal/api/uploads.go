@@ -17,6 +17,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"tokenlibrary/internal/blobrepair"
+	"tokenlibrary/internal/pdfcheck"
 	"tokenlibrary/internal/store"
 )
 
@@ -374,7 +376,16 @@ func (s *Server) completeUpload(c *gin.Context) {
 		c.JSON(500, errBody(c, "INTERNAL", "blob publish", false))
 		return
 	}
-	if _, err = tx.Exec(c, `UPDATE blobs SET state='ready' WHERE id=$1`, u.Blob); err != nil {
+	passwordRequired := false
+	if u.Mime == "application/pdf" {
+		published, err := os.ReadFile(dst)
+		if err != nil {
+			c.JSON(500, errBody(c, "INTERNAL", "blob read", false))
+			return
+		}
+		passwordRequired = pdfcheck.Classify(published).PasswordRequired
+	}
+	if _, err = tx.Exec(c, `UPDATE blobs SET state='ready', password_required=$2 WHERE id=$1`, u.Blob, passwordRequired); err != nil {
 		c.JSON(500, errBody(c, "INTERNAL", "blob record", false))
 		return
 	}
@@ -388,6 +399,72 @@ func (s *Server) completeUpload(c *gin.Context) {
 	}
 	_ = os.RemoveAll(filepath.Join(s.Cfg.DataRoot, "files", "staging", id.String()))
 	c.JSON(200, gin.H{"data": gin.H{"blobId": u.Blob.String(), "state": "ready", "sha256": hex.EncodeToString(u.Hash), "size": u.Size}, "requestId": reqID(c)})
+}
+
+func (s *Server) repairBlob(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(404, errBody(c, "NOT_FOUND", "blob", false))
+		return
+	}
+	var state string
+	var hash []byte
+	var size int64
+	err = s.S.Pool.QueryRow(c, `SELECT state, sha256, size FROM blobs WHERE id=$1 AND library_id=$2`, id, s.S.LibID).Scan(&state, &hash, &size)
+	if err != nil {
+		c.JSON(404, errBody(c, "NOT_FOUND", "blob", false))
+		return
+	}
+	limit := size + 1
+	if limit < 1 || limit > 50_000_001 {
+		limit = 50_000_001
+	}
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, limit))
+	if err != nil {
+		c.JSON(400, errBody(c, "VALIDATION", "body", false))
+		return
+	}
+	if err = blobrepair.Accept(state, hash, size, body); err != nil {
+		if errors.Is(err, blobrepair.ErrNotRepairable) {
+			c.JSON(409, errBody(c, "CONFLICT", "blob is not unavailable", false))
+			return
+		}
+		c.JSON(422, errBody(c, "HASH_MISMATCH", "repair bytes do not match the original blob", false))
+		return
+	}
+	dst := store.BlobPath(s.Cfg.DataRoot, id)
+	if err = os.MkdirAll(filepath.Dir(dst), 0750); err != nil {
+		c.JSON(500, errBody(c, "INTERNAL", "blob directory", false))
+		return
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".repair-*")
+	if err != nil {
+		c.JSON(500, errBody(c, "INTERNAL", "blob temp", false))
+		return
+	}
+	defer os.Remove(tmp.Name())
+	if err = tmp.Chmod(0640); err == nil {
+		_, err = tmp.Write(body)
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	closeErr := tmp.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmp.Name(), dst)
+	}
+	if err != nil {
+		c.JSON(500, errBody(c, "INTERNAL", "blob write", false))
+		return
+	}
+	if _, err = s.S.Pool.Exec(c, `UPDATE blobs SET state='ready' WHERE id=$1 AND library_id=$2 AND state='unavailable'`, id, s.S.LibID); err != nil {
+		c.JSON(500, errBody(c, "INTERNAL", "blob record", false))
+		return
+	}
+	c.JSON(200, gin.H{"data": gin.H{"blobId": id.String(), "state": "ready", "size": size}, "requestId": reqID(c)})
 }
 
 func (s *Server) getBlob(c *gin.Context) {

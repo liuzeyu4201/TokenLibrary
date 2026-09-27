@@ -2,6 +2,8 @@ package api_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,7 +19,9 @@ import (
 	"github.com/google/uuid"
 
 	"tokenlibrary/internal/api"
+	"tokenlibrary/internal/authn"
 	"tokenlibrary/internal/jobs"
+	"tokenlibrary/internal/store"
 	"tokenlibrary/internal/testdb"
 )
 
@@ -429,6 +433,134 @@ func importFile(t *testing.T, base, tok, epoch, name, content string) string {
 		t.Fatalf("import %d %s", res.StatusCode, b)
 	}
 	return b
+}
+
+func TestServerContractGaps(t *testing.T) {
+	st, cfg := testdb.Start(t)
+	defer st.Close()
+	ts := httptest.NewServer(api.New(cfg, st, &jobs.Runner{S: st}))
+	defer ts.Close()
+	dev := uuid.NewString()
+	loginBody := fmt.Sprintf(`{"username":"token","password":"wrong-password","deviceId":%q,"deviceName":"t","platform":"mac"}`, dev)
+	for i := 0; i < authn.LoginFailureLimit; i++ {
+		res := post(t, ts.URL+"/api/v1/auth/login", loginBody, "", "", "")
+		if res.StatusCode != 401 {
+			t.Fatalf("failure %d: %d %s", i+1, res.StatusCode, read(t, res))
+		}
+		_ = read(t, res)
+	}
+	res := post(t, ts.URL+"/api/v1/auth/login", loginBody, "", "", "")
+	limited := read(t, res)
+	if res.StatusCode != 429 || !strings.Contains(limited, "RATE_LIMITED") {
+		t.Fatalf("excess login %d %s", res.StatusCode, limited)
+	}
+
+	ok := post(t, ts.URL+"/api/v1/auth/login", fmt.Sprintf(`{"username":"token","password":"local-dev-pass","deviceId":%q,"deviceName":"t","platform":"other"}`, uuid.NewString()), "", "", "")
+	if ok.StatusCode != 429 {
+		t.Fatalf("limited address still accepted a password: %d %s", ok.StatusCode, read(t, ok))
+	}
+	_ = read(t, ok)
+
+	other := post(t, ts.URL+"/api/v1/auth/login", fmt.Sprintf(`{"username":"token","password":"local-dev-pass","deviceId":%q,"deviceName":"t","platform":"mac"}`, uuid.NewString()), "", "", "")
+	// httptest shares one client address, so the successful login is also limited.
+	if other.StatusCode != 429 {
+		t.Fatalf("same address: %d %s", other.StatusCode, read(t, other))
+	}
+	_ = read(t, other)
+
+	fresh, freshCfg := testdb.Start(t)
+	defer fresh.Close()
+	freshTS := httptest.NewServer(api.New(freshCfg, fresh, &jobs.Runner{S: fresh}))
+	defer freshTS.Close()
+	session := post(t, freshTS.URL+"/api/v1/auth/login", fmt.Sprintf(`{"username":"token","password":"local-dev-pass","deviceId":%q,"deviceName":"t","platform":"mac"}`, uuid.NewString()), "", "", "")
+	var login struct {
+		Data struct{ SessionToken, Epoch string } `json:"data"`
+	}
+	mustJSON(t, read(t, session), &login)
+
+	original := []byte("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R /Encrypt 2 0 R >>\n2 0 obj << /Filter /Standard >> endobj\n%%EOF\n")
+	sum := sha256.Sum256(original)
+	blobID := uuid.New()
+	if _, err := fresh.Pool.Exec(t.Context(), `INSERT INTO blobs(id,library_id,sha256,size,mime,state,password_required) VALUES($1,$2,$3,$4,'application/pdf','unavailable',false)`, blobID, fresh.LibID, sum[:], len(original)); err != nil {
+		t.Fatal(err)
+	}
+	bad := postBytes(t, freshTS.URL+"/api/v1/blobs/"+blobID.String()+"/repair", []byte("different-bytes"), login.Data.SessionToken, login.Data.Epoch)
+	if bad.StatusCode != 422 {
+		t.Fatalf("mismatched repair %d %s", bad.StatusCode, read(t, bad))
+	}
+	_ = read(t, bad)
+	var state string
+	if err := fresh.Pool.QueryRow(t.Context(), `SELECT state FROM blobs WHERE id=$1`, blobID).Scan(&state); err != nil || state != "unavailable" {
+		t.Fatalf("mismatch changed state %s %v", state, err)
+	}
+	good := postBytes(t, freshTS.URL+"/api/v1/blobs/"+blobID.String()+"/repair", original, login.Data.SessionToken, login.Data.Epoch)
+	if good.StatusCode != 200 {
+		t.Fatalf("matching repair %d %s", good.StatusCode, read(t, good))
+	}
+	_ = read(t, good)
+	if err := fresh.Pool.QueryRow(t.Context(), `SELECT state FROM blobs WHERE id=$1`, blobID).Scan(&state); err != nil || state != "ready" {
+		t.Fatalf("repaired state %s %v", state, err)
+	}
+	got, err := os.ReadFile(store.BlobPath(freshCfg.DataRoot, blobID))
+	if err != nil || !bytes.Equal(got, original) {
+		t.Fatalf("repaired bytes %v %q", err, got)
+	}
+
+	locked := []byte("%PDF-1.4\ntrailer << /Encrypt 9 0 R >>\n%%EOF\n")
+	hash := sha256.Sum256(locked)
+	blob := uuid.NewString()
+	uploadBody := fmt.Sprintf(`{"blobId":%q,"size":%d,"sha256":%q,"mime":"application/pdf"}`, blob, len(locked), hex.EncodeToString(hash[:]))
+	created := post(t, freshTS.URL+"/api/v1/uploads", uploadBody, login.Data.SessionToken, login.Data.Epoch, "")
+	var upload struct {
+		Data struct{ UploadID string `json:"uploadId"` } `json:"data"`
+	}
+	mustJSON(t, read(t, created), &upload)
+	chunk := putBytes(t, freshTS.URL+"/api/v1/uploads/"+upload.Data.UploadID+"/chunks/0", locked, login.Data.SessionToken, login.Data.Epoch)
+	if chunk.StatusCode != 200 {
+		t.Fatalf("chunk %d %s", chunk.StatusCode, read(t, chunk))
+	}
+	_ = read(t, chunk)
+	done := post(t, freshTS.URL+"/api/v1/uploads/"+upload.Data.UploadID+"/complete", `{}`, login.Data.SessionToken, login.Data.Epoch, "")
+	if done.StatusCode != 200 {
+		t.Fatalf("complete %d %s", done.StatusCode, read(t, done))
+	}
+	_ = read(t, done)
+	var passwordRequired bool
+	if err := fresh.Pool.QueryRow(t.Context(), `SELECT password_required FROM blobs WHERE id=$1`, blob).Scan(&passwordRequired); err != nil || !passwordRequired {
+		t.Fatalf("password_required=%v err=%v", passwordRequired, err)
+	}
+}
+
+func postBytes(t *testing.T, url string, body []byte, tok, epoch string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	if epoch != "" {
+		req.Header.Set("X-Library-Epoch", epoch)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
+}
+
+func putBytes(t *testing.T, url string, body []byte, tok, epoch string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader(body))
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	if epoch != "" {
+		req.Header.Set("X-Library-Epoch", epoch)
+	}
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res
 }
 
 func TestUploadTokenImportStatus(t *testing.T) {
