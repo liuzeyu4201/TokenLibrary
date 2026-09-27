@@ -760,6 +760,14 @@ struct CatalogInspectorView: View {
 
     var body: some View {
         Form {
+            if doc.catalog.inbox && doc.state == "active" && !doc.catalog.archived {
+                Section {
+                    Button("整理完成，移出收件箱") { perform { _ = try store.markCatalogOrganized(id: doc.id) } }
+                        .accessibilityLabel("整理完成，移出收件箱")
+                    Text("点这里即可离开收件箱。标题、作者和专题可以稍后补，阅读不受影响。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             if doc.catalog.archived {
                 Section {
                     Label("已归档 · 原件和关联仍保留", systemImage: "archivebox")
@@ -873,7 +881,6 @@ struct CatalogInspectorView: View {
 
     private var organizationSection: some View {
         Section("整理") {
-            if doc.catalog.inbox { Button("整理完成，移出收件箱") { perform { _ = try store.markCatalogOrganized(id: doc.id) } } }
             if doc.kind != .folder {
                 if topics.isEmpty { Text("尚无专题，可在资料库中新建。 ").foregroundStyle(.secondary) }
                 ForEach(topics, id: \.id) { topic in
