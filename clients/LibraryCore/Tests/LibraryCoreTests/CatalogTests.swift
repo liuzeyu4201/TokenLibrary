@@ -71,6 +71,93 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(outcome.reviewMessage.contains("需要核对"), true)
     }
 
+    func testReplacingPDFUploadsThePreviousLocalBlobBeforeSync() async throws {
+        let store = try makeStore()
+        let original = PDFExport.makeSamplePDF(text: "Coordinates belong to the first original")
+        let revised = PDFExport.makeSamplePDF(text: "The replacement is a different file")
+        let oldAsset = try store.importAttachment(data: original, fileName: "paper.pdf", mime: "application/pdf")
+        XCTAssertEqual(try store.transfer(blobId: oldAsset.blobId)?.state, "local")
+        let annotation = PDFTextAnnotation(type: "highlight", pageIndex: 0, x: 0.1, y: 0.2, width: 0.3, height: 0.05, color: "yellow", text: "old highlight", pdfBlobId: oldAsset.blobId)
+        let pdf = LibraryDocument(id: UUID().uuidString.lowercased(), kind: .pdf, parentId: "root", name: "paper.pdf",
+                                   markdown: "", pdfPath: try store.resolveAttachment(path: oldAsset.path).path, revision: 0, localGeneration: 0, state: "active", purgeAt: nil,
+                                   status: .savedLocal, annotationsJSON: String(decoding: try JSONEncoder().encode([annotation]), as: UTF8.self), pdfBlobId: oldAsset.blobId)
+        try store.saveDocument(pdf, enqueue: false)
+        let outcome = try store.replacePDFOriginal(id: pdf.id, data: revised, fileName: "revised.pdf")
+        XCTAssertEqual(try store.transfer(blobId: oldAsset.blobId)?.state, "local")
+        XCTAssertNotEqual(outcome.newBlobID, oldAsset.blobId)
+
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("blob-upload-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        directories.append(directory)
+        let scriptURL = directory.appendingPathComponent("uploads.py")
+        let logURL = directory.appendingPathComponent("uploads.jsonl")
+        let script = """
+        import json, sys
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        logp = sys.argv[1]
+        class H(BaseHTTPRequestHandler):
+            def _send(self, code, payload):
+                raw = json.dumps(payload).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+            def _body(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                return self.rfile.read(n)
+            def _log(self, item):
+                with open(logp, "a") as handle:
+                    handle.write(json.dumps(item) + "\\n")
+            def do_POST(self):
+                raw = self._body()
+                if self.path == "/api/v1/uploads":
+                    body = json.loads(raw)
+                    self._log({"path": self.path, "blobId": body["blobId"]})
+                    self._send(200, {"data": {"uploadId": body["blobId"], "chunkSize": 1048576, "state": "uploading"}})
+                    return
+                if self.path.endswith("/complete"):
+                    blob = self.path.split("/")[-2]
+                    self._log({"path": "complete", "blobId": blob})
+                    self._send(200, {"data": {"blobId": blob, "state": "ready"}})
+                    return
+                self._send(200, {"data": {}})
+            def do_GET(self):
+                self._send(200, {"data": {"state": "uploading", "chunks": []}})
+            def do_PUT(self):
+                self._body()
+                self._send(200, {"data": {}})
+            def log_message(self, *args):
+                pass
+        httpd = HTTPServer(("127.0.0.1", 0), H)
+        print(str(httpd.server_address[1]).ljust(16), flush=True)
+        httpd.serve_forever()
+        """
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        process.arguments = [scriptURL.path, logURL.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        try process.run()
+        defer { process.terminate() }
+        let portData = (try? pipe.fileHandleForReading.read(upToCount: 16)) ?? Data()
+        let port = try XCTUnwrap(Int(String(decoding: portData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)))
+        let client = SyncClient(baseURL: URL(string: "http://127.0.0.1:\(port)")!, retryPolicy: .none)
+        client.sessionToken = "tok"
+        client.epoch = UUID().uuidString.lowercased()
+        client.libraryId = UUID().uuidString.lowercased()
+        try await client.prepareAttachments(objectId: pdf.id, store: store)
+
+        XCTAssertEqual(try store.transfer(blobId: oldAsset.blobId)?.state, "complete")
+        XCTAssertEqual(try store.transfer(blobId: outcome.newBlobID)?.state, "complete")
+        XCTAssertEqual(try store.loadDocument(id: pdf.id)?.pdfBlobId, outcome.newBlobID)
+        let lines = try String(contentsOf: logURL, encoding: .utf8).split(separator: "\n").map { try JSONDecoder().decode([String: String].self, from: Data($0.utf8)) }
+        let uploaded = lines.filter { $0["path"] == "/api/v1/uploads" }.compactMap { $0["blobId"] }
+        XCTAssertEqual(uploaded, [outcome.newBlobID, oldAsset.blobId])
+    }
+
     func testMetadataSurvivesRelaunchAndPreservesUnknownFields() throws {
         let store = try makeStore()
         let doc = try seed(store, metadata: #"{"future":{"nested":true},"year":2020}"#)

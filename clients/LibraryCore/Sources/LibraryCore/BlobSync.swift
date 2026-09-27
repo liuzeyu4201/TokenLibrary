@@ -83,6 +83,12 @@ extension SyncClient {
                 let asset = try store.registerAttachment(path: path, mime: "application/pdf")
                 try await uploadAttachment(asset, store: store)
                 if document.pdfBlobId != asset.blobId { document.pdfBlobId = asset.blobId; changed = true }
+                // Annotations keep the previous original's blob id after a replacement.
+                // That file stays local until it is uploaded; the server rejects the
+                // operation when any referenced blob is not ready.
+                for blobID in annotationPDFBlobIDs(document.annotationsJSON) where blobID != asset.blobId {
+                    try await uploadStoredBlob(blobID, store: store)
+                }
             }
             if document.kind == .md {
                 let parsed = try MarkdownReferences(document.markdown)
@@ -115,5 +121,30 @@ extension SyncClient {
             return
         }
         throw SyncFailure(kind: .unknown, title: "附件等待本机编辑完成", message: "文档在上传附件期间仍有新修改，已保留全部编辑。", recoverySuggestion: "稍后再次同步。", isRetryable: true)
+    }
+
+    func annotationPDFBlobIDs(_ json: String) -> [String] {
+        let annotations = (try? JSONDecoder().decode([PDFTextAnnotation].self, from: Data(json.utf8))) ?? []
+        var seen = Set<String>()
+        var ids: [String] = []
+        for annotation in annotations {
+            guard let id = annotation.pdfBlobId, UUID(uuidString: id) != nil, seen.insert(id).inserted else { continue }
+            ids.append(id)
+        }
+        return ids
+    }
+
+    func uploadStoredBlob(_ blobID: String, store: DocumentStore) async throws {
+        if let transfer = try store.transfer(blobId: blobID) {
+            try await uploadAttachment(transfer.asset, store: store)
+            return
+        }
+        let relative = "media/\(blobID).pdf"
+        let url = try store.resolveAttachment(path: relative)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        let data = try Data(contentsOf: url)
+        let asset = LibraryAsset(blobId: blobID, path: relative, sha256: BlobIntegrity.sha256(data), size: Int64(data.count), mime: "application/pdf")
+        try store.updateTransfer(asset, uploadId: nil, state: "local")
+        try await uploadAttachment(asset, store: store)
     }
 }
