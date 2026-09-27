@@ -34,6 +34,43 @@ final class CatalogTests: XCTestCase {
         XCTAssertEqual(partial.category, .unclassified)
     }
 
+    func testReplacingPDFOriginalKeepsTheItemAndMarksOldCoordinatesForReview() throws {
+        let store = try makeStore()
+        let original = PDFExport.makeSamplePDF(text: "Original page coordinates belong to this file")
+        let revised = PDFExport.makeSamplePDF(text: "Revised pages must not inherit those coordinates")
+        let oldAsset = try store.importAttachment(data: original, fileName: "paper.pdf", mime: "application/pdf")
+        let oldPath = try store.resolveAttachment(path: oldAsset.path).path
+        let annotation = PDFTextAnnotation(type: "highlight", pageIndex: 0, x: 0.1, y: 0.2, width: 0.3, height: 0.05, color: "yellow", text: "old highlight", pdfBlobId: oldAsset.blobId)
+        let annotations = String(data: try JSONEncoder().encode([annotation]), encoding: .utf8)!
+        var pdf = LibraryDocument(id: UUID().uuidString.lowercased(), kind: .pdf, parentId: "root", name: "paper.pdf",
+                                   markdown: "", pdfPath: oldPath, revision: 0, localGeneration: 0, state: "active", purgeAt: nil,
+                                   status: .savedLocal, annotationsJSON: annotations, pdfBlobId: oldAsset.blobId)
+        var metadata = CatalogMetadata(category: .paper)
+        metadata.originalFileHash = oldAsset.sha256
+        pdf.metadataJSON = try metadata.json()
+        try store.saveDocument(pdf, enqueue: false)
+        let note = try store.createCatalogNote(sourceID: pdf.id, quote: "Original page coordinates", pageIndex: 0, fileHash: oldAsset.sha256)
+        XCTAssertEqual(FileNames.availableName("paper.pdf", kind: .pdf, takenKeys: ["paper.pdf"]), "paper_1.pdf")
+
+        let outcome = try store.replacePDFOriginal(id: pdf.id, data: revised, fileName: "paper.pdf")
+
+        XCTAssertEqual(outcome.document.id, pdf.id)
+        XCTAssertEqual(outcome.document.name, "paper.pdf")
+        XCTAssertEqual(outcome.newBlobID, outcome.document.pdfBlobId)
+        XCTAssertNotEqual(outcome.newBlobID, oldAsset.blobId)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: oldPath)), original)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: XCTUnwrap(outcome.document.pdfPath))), revised)
+        let saved = try JSONDecoder().decode([PDFTextAnnotation].self, from: Data(outcome.document.annotationsJSON.utf8))
+        XCTAssertEqual(saved.count, 1)
+        XCTAssertEqual(saved[0].pdfBlobId, oldAsset.blobId)
+        XCTAssertEqual(saved[0].placementState, "needs_review")
+        XCTAssertEqual(saved[0].pageIndex, 0)
+        XCTAssertTrue(saved[0].needsPlacementReview(for: outcome.newBlobID))
+        XCTAssertEqual(try store.catalogSourceState(for: XCTUnwrap(note.catalog.excerpts.first)), .fileChanged)
+        XCTAssertEqual(try store.listDocuments().filter { $0.kind == .pdf }.count, 1)
+        XCTAssertEqual(outcome.reviewMessage.contains("需要核对"), true)
+    }
+
     func testMetadataSurvivesRelaunchAndPreservesUnknownFields() throws {
         let store = try makeStore()
         let doc = try seed(store, metadata: #"{"future":{"nested":true},"year":2020}"#)

@@ -374,6 +374,17 @@ public struct CatalogQuery: Equatable, Sendable {
     }
 }
 
+public struct PDFRevisionAttachment: Equatable, Sendable {
+    public let document: LibraryDocument
+    public let previousBlobID: String?
+    public let previousPath: String?
+    public let newBlobID: String
+    public let annotationsNeedingReview: Int
+    public var reviewMessage: String {
+        "已更换这份资料的 PDF 原件。旧批注坐标和摘录位置需要核对，不会套用到新文件。上一份原件仍保留在本机。"
+    }
+}
+
 public enum CatalogSourceState: Equatable, Sendable {
     case checking, available, missing, trashed, needsDownload, fileChanged, unverifiedVersion
     public var title: String {
@@ -503,6 +514,43 @@ public extension DocumentStore {
             if m.archived != archived { m.archivedAt = archived ? Date() : nil }
             m.archived = archived
             if archived { m.inbox = false }
+        }
+    }
+
+    /// Attaches new PDF bytes to an existing item. The previous blob file stays
+    /// on disk, and coordinates recorded against that blob are marked for review.
+    @discardableResult
+    func replacePDFOriginal(id: String, data: Data, fileName: String) throws -> PDFRevisionAttachment {
+        try PDFImportValidation.validate(data: data)
+        guard let existing = try loadDocument(id: id), existing.kind == .pdf, existing.state == "active" else { throw CatalogError.notFound }
+        guard !existing.catalog.archived else { throw CatalogError.archived }
+        let asset = try importAttachment(data: data, fileName: fileName, mime: "application/pdf")
+        let stored = try resolveAttachment(path: asset.path)
+        return try db.write { db in
+            var doc = try activeCatalogDocument(id, db: db)
+            guard doc.kind == .pdf else { throw CatalogError.invalidCategory }
+            let previousBlob = doc.pdfBlobId
+            let previousPath = doc.pdfPath
+            var annotations = (try? JSONDecoder().decode([PDFTextAnnotation].self, from: Data(doc.annotationsJSON.utf8))) ?? []
+            var reviewCount = 0
+            for index in annotations.indices {
+                let bound = annotations[index].pdfBlobId ?? previousBlob
+                if bound != asset.blobId {
+                    annotations[index].pdfBlobId = bound
+                    annotations[index].placementState = "needs_review"
+                    reviewCount += 1
+                }
+            }
+            doc.pdfBlobId = asset.blobId
+            doc.pdfPath = stored.path
+            if let encoded = try? JSONEncoder().encode(annotations), let json = String(data: encoded, encoding: .utf8) {
+                doc.annotationsJSON = json
+            }
+            var metadata = doc.catalog
+            metadata.originalFileHash = asset.sha256
+            doc.metadataJSON = try metadata.jsonChanges(from: existing.catalog, preserving: doc.metadataJSON)
+            let saved = try saveCatalogDocument(doc, db: db)
+            return PDFRevisionAttachment(document: saved, previousBlobID: previousBlob, previousPath: previousPath, newBlobID: asset.blobId, annotationsNeedingReview: reviewCount)
         }
     }
 

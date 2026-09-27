@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 import LibraryCore
 import PDFKit
 
@@ -746,6 +747,7 @@ struct CatalogInspectorView: View {
     @State private var errorMessage: String?
     @State private var notice = ""
     @State private var sourceStates: [String: CatalogSourceState] = [:]
+    @State private var revisionPicker = false
 
     private var doc: LibraryDocument { current ?? document }
     private var inventory: LegacyLibraryInventory? { try? store.legacyLibraryInventory() }
@@ -780,6 +782,9 @@ struct CatalogInspectorView: View {
             }
         }
         .formStyle(.grouped)
+        .fileImporter(isPresented: $revisionPicker, allowedContentTypes: [.pdf], allowsMultipleSelection: false) { result in
+            replacePDFOriginal(result)
+        }
         .navigationTitle("资料详情")
         .interactiveDismissDisabled(hasUnsavedInputs)
         .toolbar {
@@ -887,6 +892,31 @@ struct CatalogInspectorView: View {
                 Text("专题成员通过“加入专题”关联，移出专题不会删除原件。 ").font(.caption).foregroundStyle(.secondary)
             }
             if !doc.catalog.archived { Button("归档") { perform { _ = try store.setCatalogArchived(id: doc.id, archived: true) } } }
+            if doc.kind == .pdf && doc.state == "active" && !doc.catalog.archived {
+                Button("更换 PDF 原件") { revisionPicker = true }
+                    .accessibilityLabel("更换 PDF 原件")
+                Text("更换后仍是同一份资料。旧批注和摘录位置会标成待核对，上一份原件不会被覆盖。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func replacePDFOriginal(_ result: Result<URL, Error>) {
+        switch result {
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        case .success(let url):
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try PDFImportValidation.read(url: url)
+                let outcome = try store.replacePDFOriginal(id: doc.id, data: data, fileName: url.lastPathComponent)
+                current = outcome.document
+                notice = outcome.reviewMessage
+                onChange()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
