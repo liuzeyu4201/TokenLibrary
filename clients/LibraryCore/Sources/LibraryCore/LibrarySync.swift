@@ -24,6 +24,7 @@ extension SyncClient {
         let after = try await pullChanges(store: store, epoch: epoch)
         summary.downloaded += after.downloaded; summary.deleted += after.deleted
         try await fetchConflictMaterials(store: store)
+        try store.pruneAcknowledgedOperations()
         summary.conflicts = try store.conflicts().count
         summary.cursor = store.syncCursor
         return summary

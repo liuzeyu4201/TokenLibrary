@@ -54,6 +54,12 @@ class DeploymentValidationTests(unittest.TestCase):
         self.assertTrue((data / "files" / "objects").is_dir())
         self.assertTrue(backup.is_dir())
         self.assertFalse((data / "postgres").exists())
+    def test_app_version_must_be_numeric(self):
+        self.settings["APP_VERSION"] = "not a version"
+        with self.assertRaisesRegex(ValueError, "APP_VERSION"): manage.validate(self.settings)
+        self.settings["APP_VERSION"] = "1.0.0"
+        self.settings["APP_BUILD"] = "1a"
+        with self.assertRaisesRegex(ValueError, "APP_BUILD"): manage.validate(self.settings)
     def test_invalid_timezone_has_actionable_error(self):
         self.settings["BACKUP_TIMEZONE"] = "Not/A-Timezone"
         with self.assertRaisesRegex(ValueError, "BACKUP_TIMEZONE"): manage.validate(self.settings)

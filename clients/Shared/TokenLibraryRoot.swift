@@ -141,7 +141,10 @@ final class AppModel: ObservableObject {
     @Published var store: DocumentStore {
         didSet {
             // Reopening the same server library during login must keep its local error.
-            if oldValue.root.standardizedFileURL != store.root.standardizedFileURL { dismissLocalOperationError() }
+            if oldValue.root.standardizedFileURL != store.root.standardizedFileURL {
+                dismissLocalOperationError()
+                libraryStamp = nil
+            }
         }
     }
     let workspaces: LibraryWorkspaceManager
@@ -413,14 +416,32 @@ final class AppModel: ObservableObject {
     }
 
     var selected: LibraryDocument? {
-        documents.first(where: { $0.id == selectedId && $0.state == "active" })
+        guard let id = selectedId, let listed = documents.first(where: { $0.id == id && $0.state == "active" }) else { return nil }
+        guard listed.kind == .md else { return listed }
+        return (try? store.loadDocument(id: id)) ?? listed
+    }
+
+    private var libraryStamp: String?
+    private var shelfReloadQueued = false
+
+    func scheduleShelfReload() {
+        guard !shelfReloadQueued else { return }
+        shelfReloadQueued = true
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(300))
+            shelfReloadQueued = false
+            reload()
+        }
     }
 
     func reload() {
+        let stamp = try? store.libraryRevisionStamp()
+        if let stamp, stamp == libraryStamp { return }
         do {
-            documents = try store.listDocuments(includeTrashed: true)
+            documents = try store.listDocuments(includeTrashed: true, includeBodies: false)
             libraryInventory=try store.legacyLibraryInventory()
             pendingCount = try store.pending().count
+            libraryStamp = stamp
         } catch { reportLocal("读取本机资料", error: error); return }
         lastSyncAt=(preferences.object(forKey:lastSyncPreferenceKey) as? TimeInterval).map(Date.init(timeIntervalSince1970:))
         if !query.isEmpty { updateSearch() }
@@ -703,7 +724,7 @@ final class AppModel: ObservableObject {
                     try await Task.sleep(for: .milliseconds(500))
                     guard activeClient === client,activeStore === store,!isLocalWorkspace else { return }
                     activeClient.onLibraryPage = { [weak self] in
-                        Task { @MainActor in self?.reload() }
+                        Task { @MainActor in self?.scheduleShelfReload() }
                     }
                     let result = try await activeClient.synchronize(store:activeStore,rootId:rootID)
                     try Task.checkCancellation()
@@ -1255,7 +1276,9 @@ struct LibraryView: View {
           ZStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 36) {
-                    shelfCaption
+                    if shelfCaptionVisible {
+                        shelfCaption
+                    }
                     if !shelfFolders.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
                             Text("文件夹").font(.caption).foregroundStyle(.secondary)
@@ -1578,13 +1601,36 @@ struct LibraryView: View {
         folderAccessing=false;markdownFolder=nil;folderCandidates=[];folderImportRequest=nil
     }
 
+    /// The quiet “目录已同步 / 选择一本，进入阅读” line stays off the iPhone shelf.
+    private var shelfCaptionVisible: Bool {
+        #if os(iOS)
+        let query = model.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if model.searchTruncated || !query.isEmpty || model.isLocalWorkspace { return true }
+        return model.syncing || model.connectionError != nil || model.session == nil
+        #else
+        return true
+        #endif
+    }
+
     private var shelfCaption: some View {
         VStack(alignment: .leading, spacing: 6) {
+            #if os(iOS)
+            if model.syncing || model.connectionError != nil || model.session == nil || model.isLocalWorkspace {
+                Text(model.syncStatusLine)
+            }
+            #else
             Text(model.syncStatusLine)
+            #endif
             if model.searchTruncated {
                 Text("只列出前 1000 本。换一个更具体的词，才能看到其余的。")
             } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                #if os(iOS)
+                if model.isLocalWorkspace {
+                    Text("这些书只留在这台设备，不会同步。")
+                }
+                #else
                 Text(model.isLocalWorkspace ? "这些书只留在这台设备，不会同步。" : "选择一本，进入阅读。")
+                #endif
             } else {
                 Text("搜索结果")
             }
@@ -1775,7 +1821,10 @@ struct EditorScreen: View {
     @State private var editorHandle=EditorBridgeHandle()
     @State private var inspecting = false
     @State private var stickyPresented = false
-    var doc: LibraryDocument? { model.documents.first(where: { $0.id == docId }) }
+    var doc: LibraryDocument? {
+        if model.selectedId == docId { return model.selected }
+        return model.documents.first(where: { $0.id == docId })
+    }
     var body: some View {
         Group {
             if let doc {
@@ -2307,6 +2356,16 @@ struct TrashView: View {
     }
 }
 
+enum AppRelease {
+    static var display: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "未知"
+        let build = info?["CFBundleVersion"] as? String ?? ""
+        if build.isEmpty || build == version { return version }
+        return "\(version)（\(build)）"
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     var body: some View {
@@ -2337,6 +2396,9 @@ struct SettingsView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+            Section("版本") {
+                Text(AppRelease.display)
             }
             Section("连接与提交") {
                 Text(model.server.isEmpty ? "尚未配置服务器" : model.server)

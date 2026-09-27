@@ -79,7 +79,7 @@ extension DocumentStore {
     /// chains stay listed separately; they are never silently promoted to roots.
     public func legacyLibraryInventory() throws -> LegacyLibraryInventory {
         try db.read { db in
-            let documents = try Row.fetchAll(db, sql: "SELECT * FROM working_documents WHERE state<>'purged'").map(mapDoc)
+            let documents = try Row.fetchAll(db, sql: "SELECT id,kind,parent_id,name,'' AS markdown,pdf_path,revision,local_generation,state,purge_at,status,annotations_json,metadata_json,assets_json,pdf_blob_id FROM working_documents WHERE state<>'purged'").map(mapDoc)
             let byID = Dictionary(uniqueKeysWithValues: documents.map { ($0.id, $0) })
             var roots = try registeredLegacyRootIDs(db: db)
             roots.insert("root")

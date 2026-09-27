@@ -1,0 +1,7 @@
+// Default app version. A scheme build refreshes AppVersion.local.xcconfig from
+// the repository .env (or .env.example when a key is absent) and that file overrides these.
+APP_VERSION = 1.0.0
+APP_BUILD = 1
+MARKETING_VERSION = $(APP_VERSION)
+CURRENT_PROJECT_VERSION = $(APP_BUILD)
+#include? "AppVersion.local.xcconfig"

@@ -234,7 +234,7 @@ final class AppModelTests: XCTestCase {
         _ = try editor.save("last keystroke in old workspace")
         f.model.reload()
         XCTAssertEqual(try oldStore.loadDocument(id: original.id)?.markdown, "last keystroke in old workspace")
-        XCTAssertEqual(f.model.documents.first(where: { $0.id == original.id })?.markdown, "new workspace")
+        XCTAssertEqual(try f.model.store.loadDocument(id: original.id)?.markdown, "new workspace")
         XCTAssertTrue(try other.pending().isEmpty)
     }
 

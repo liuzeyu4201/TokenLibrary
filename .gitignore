@@ -3,6 +3,7 @@
 .env
 .env.*
 !.env.example
+clients/Config/AppVersion.local.xcconfig
 *.log
 *.sqlite
 *.sqlite-shm

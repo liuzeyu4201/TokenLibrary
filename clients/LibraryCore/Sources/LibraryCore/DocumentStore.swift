@@ -361,12 +361,37 @@ public final class DocumentStore: @unchecked Sendable {
         }
     }
 
-    public func listDocuments(includeTrashed: Bool = false) throws -> [LibraryDocument] {
+    /// `includeBodies` false leaves markdown empty. The shelf uses that so thousands of
+    /// notes are not copied into the interface on every refresh; open a note to read its text.
+    public func listDocuments(includeTrashed: Bool = false, includeBodies: Bool = true) throws -> [LibraryDocument] {
         try db.read { db in
-            let sql = includeTrashed
-                ? "SELECT * FROM working_documents ORDER BY CASE kind WHEN 'folder' THEN 0 ELSE 1 END, name COLLATE NOCASE"
-                : "SELECT * FROM working_documents WHERE state='active' ORDER BY CASE kind WHEN 'folder' THEN 0 ELSE 1 END, name COLLATE NOCASE"
+            let markdown = includeBodies ? "markdown" : "'' AS markdown"
+            let whereState = includeTrashed ? "" : "WHERE state='active' "
+            let sql = """
+                SELECT id,kind,parent_id,name,\(markdown),pdf_path,revision,local_generation,state,purge_at,status,annotations_json,metadata_json,assets_json,pdf_blob_id
+                FROM working_documents \(whereState)ORDER BY CASE kind WHEN 'folder' THEN 0 ELSE 1 END, name COLLATE NOCASE
+                """
             return try Row.fetchAll(db, sql: sql).map(mapDoc)
+        }
+    }
+
+    /// Changes when a row, its file path, or the queue changes. The shelf skips redraws when this is unchanged.
+    public func libraryRevisionStamp() throws -> String {
+        try db.read { db in
+            guard let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) AS n,
+                       COALESCE(MAX(updated_at),'') AS updated,
+                       COALESCE(SUM(LENGTH(IFNULL(pdf_path,''))),0) AS paths,
+                       (SELECT COUNT(*) FROM pending_operations WHERE state IN ('pending','awaiting_remote','needs_edit','conflict')) AS pending,
+                       (SELECT COUNT(*) FROM sync_conflicts WHERE state='open' OR state LIKE 'resolving:%') AS conflicts
+                FROM working_documents
+                """) else { return "0" }
+            let count: Int64 = row["n"]
+            let updated: String = row["updated"]
+            let paths: Int64 = row["paths"]
+            let pending: Int64 = row["pending"]
+            let conflicts: Int64 = row["conflicts"]
+            return "\(count)|\(updated)|\(paths)|\(pending)|\(conflicts)"
         }
     }
 
@@ -484,6 +509,18 @@ public final class DocumentStore: @unchecked Sendable {
                 n += 1
             }
             return n
+        }
+    }
+
+    /// Keeps the newest acknowledged request for each document and drops the older copies.
+    public func pruneAcknowledgedOperations() throws {
+        try db.write { db in
+            try db.execute(sql: """
+                DELETE FROM pending_operations
+                WHERE state='sent' AND rowid NOT IN (
+                    SELECT MAX(rowid) FROM pending_operations WHERE state='sent' GROUP BY object_id
+                )
+                """)
         }
     }
 
@@ -669,13 +706,14 @@ public final class DocumentStore: @unchecked Sendable {
 
     func reindex(_ doc: LibraryDocument, db: Database, verifyExistingChunks: Bool = false) throws {
         let metadata = doc.name + "\n" + doc.markdown + "\n" + doc.catalog.searchText
-        var pdfURL: URL?, pdfIdentity: String?
+        var pdfURL: URL?, pdfIdentity: String?, pdfByteCount: Int64 = 0
         if doc.kind == .pdf, let path = doc.pdfPath {
             let originalURL = URL(fileURLWithPath: path).standardizedFileURL
             let verifiedURL = try? resolveAttachment(path: path)
             let url = verifiedURL ?? originalURL
             if let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) {
                 let size = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+                pdfByteCount = size
                 let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
                 let rootPrefix = root.resolvingSymlinksInPath().standardizedFileURL.path + "/"
                 let location: String
@@ -692,7 +730,16 @@ public final class DocumentStore: @unchecked Sendable {
             }
         }
         // Most reading-position saves stop here: no page-cache decoding, PDF IO or FTS writes.
-        let signature = BlobIntegrity.sha256(Data((doc.kind.rawValue + "\n" + metadata + "\n" + (pdfIdentity ?? "")).utf8))
+        // Files already indexed are reused from the page cache. A large PDF that has
+        // never been indexed stays on disk; reading it would build the page text in memory.
+        let pdfTextIsCached: Bool
+        if let pdfIdentity {
+            pdfTextIsCached = try Int.fetchOne(db, sql: "SELECT 1 FROM pdf_page_text_cache WHERE identity=?", arguments: [pdfIdentity]) != nil
+        } else {
+            pdfTextIsCached = false
+        }
+        let indexPDFText = pdfIdentity != nil && (pdfTextIsCached || pdfByteCount <= 8_000_000)
+        let signature = BlobIntegrity.sha256(Data((doc.kind.rawValue + "\n" + metadata + "\n" + (indexPDFText ? (pdfIdentity ?? "") : "")).utf8))
         if try String.fetchOne(db, sql: "SELECT signature FROM search_index_state WHERE object_id=?", arguments: [doc.id]) == signature {
             if !verifyExistingChunks { return }
             // A legacy open may have dropped PDF rows while the absolute path
@@ -713,13 +760,13 @@ public final class DocumentStore: @unchecked Sendable {
         }
         var chunks: [(source: String, text: String)] = [("metadata", metadata)]
         var cachedPDFIdentity: String?
-        if let url = pdfURL, let identity = pdfIdentity {
+        if indexPDFText, let url = pdfURL, let identity = pdfIdentity {
             let pages: [String]
             if let cached = try String.fetchOne(db, sql: "SELECT pages_json FROM pdf_page_text_cache WHERE identity=?", arguments: [identity]),
                let decoded = try? JSONDecoder().decode([String].self, from: Data(cached.utf8)) {
                 pages = decoded; cachedPDFIdentity = identity
             }
-            else if let data = try? Data(contentsOf: url) {
+            else if pdfByteCount <= 8_000_000, let data = try? Data(contentsOf: url) {
                 pages = pdfPageTextExtractor(data)
                 let encoded = String(decoding: try JSONEncoder().encode(pages), as: UTF8.self)
                 try db.execute(sql: "INSERT OR REPLACE INTO pdf_page_text_cache(identity,pages_json) VALUES (?,?)", arguments: [identity,encoded])

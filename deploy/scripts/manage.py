@@ -101,6 +101,10 @@ def validate(settings: dict[str, str], root: Path = ROOT) -> tuple[Path, Path, s
     # Compose interpolates this into a URL; require URL-safe password characters.
     if not re.fullmatch(r"[A-Za-z0-9_.~-]+", settings["POSTGRES_PASSWORD"]):
         raise ValueError("POSTGRES_PASSWORD must use URL-safe letters, digits or _ . ~ -")
+    if settings.get("APP_VERSION") and not re.fullmatch(r"[0-9]+(?:\.[0-9]+){1,3}", settings["APP_VERSION"]):
+        raise ValueError("APP_VERSION must look like 1.0.0")
+    if settings.get("APP_BUILD") and not re.fullmatch(r"[0-9]+", settings["APP_BUILD"]):
+        raise ValueError("APP_BUILD must be a number")
     return data, backup, deployment
 
 def wait_https(origin: str, timeout: float = 600) -> None:
