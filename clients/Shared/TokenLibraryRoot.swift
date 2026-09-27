@@ -1096,6 +1096,7 @@ struct LibraryView: View {
         var id: String { rawValue }
     }
     @ObservedObject var model: AppModel
+    @Environment(\.horizontalSizeClass) private var shelfWidth
     @State private var utilitySheet: UtilitySheet?
     @State private var importPicker = LibraryImportPickerState()
     @State private var shownFolders = 24
@@ -1155,7 +1156,7 @@ struct LibraryView: View {
                         }
                     }
                 }
-                .padding(28)
+                .padding(shelfWidth == .compact ? 16 : 28)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .id(model.currentFolder)
                 .transition(.modifier(
@@ -1187,6 +1188,9 @@ struct LibraryView: View {
             }
             .searchable(text: $model.query, isPresented: $model.searchPresented, prompt: "在资料库中查找")
             .navigationTitle(model.folderName)
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #endif
             .navigationBarBackButtonHidden(!model.isAtRoot)
             .toolbar {
                 if !model.isAtRoot {
@@ -1379,7 +1383,11 @@ struct LibraryView: View {
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: closeReading) {
-                    Label("资料库", ink: "chevron.left")
+                    if shelfWidth == .compact {
+                        InkGlyph(name: "chevron.left").frame(width: 18, height: 18)
+                    } else {
+                        Label("资料库", ink: "chevron.left")
+                    }
                 }
                 .accessibilityLabel("返回资料库")
             }
@@ -1446,8 +1454,14 @@ struct LibraryView: View {
         }
     }
 
-    private var foldColumns: [GridItem] { [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 28)] }
-    private var bookColumns: [GridItem] { [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 22)] }
+    private var foldColumns: [GridItem] {
+        let compact = shelfWidth == .compact
+        return [GridItem(.adaptive(minimum: compact ? 160 : 180, maximum: compact ? 400 : 240), spacing: compact ? 18 : 28)]
+    }
+    private var bookColumns: [GridItem] {
+        let compact = shelfWidth == .compact
+        return [GridItem(.adaptive(minimum: compact ? 148 : 140, maximum: compact ? 220 : 180), spacing: compact ? 14 : 22)]
+    }
 
     private func foldedFolder(_ doc: LibraryDocument) -> some View {
         Button {
@@ -1524,7 +1538,8 @@ struct LibraryView: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .frame(width: 132, height: excerpt == nil ? 188 : 210)
+            .frame(maxWidth: .infinity)
+            .frame(height: shelfWidth == .compact ? (excerpt == nil ? 168 : 196) : (excerpt == nil ? 188 : 210))
             .background(LibraryPalette.paper)
             .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(LibraryPalette.ink.opacity(0.22), lineWidth: 1))
@@ -1632,6 +1647,9 @@ struct EditorScreen: View {
                               onError:{ if store === model.store { model.reportLocal("保存笔记",message:$0) } },onOpenLink:model.openDocumentLink)
                 }
                 .navigationTitle(doc.catalogTitle)
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #endif
                 .toolbar {
                     if let note=model.sourceReturnNote {
                         Button { editorHandle.flush { if $0 { model.returnToReadingNote() } } } label: { Label("返回笔记", ink: "arrow.uturn.backward") }
@@ -1735,6 +1753,9 @@ struct PDFReaderView: View {
             if let document {
                 readerContent
                     .navigationTitle(document.catalogTitle)
+                    #if os(iOS)
+                    .navigationBarTitleDisplayMode(.inline)
+                    #endif
                     .toolbar { readerToolbar(document) }
                     .alert("文字备注",isPresented:$commentPresented) {
                         TextField("备注内容",text:$commentDraft)
