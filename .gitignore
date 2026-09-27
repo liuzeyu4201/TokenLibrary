@@ -1,20 +1,53 @@
+# Local runtime and secrets. .env.example stays in git.
 .local/
 .env
+.env.*
+!.env.example
 *.log
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Python
 __pycache__/
 *.pyc
+.venv/
+
+# Node and the editor build. clients/editor is the copy the app loads, so it stays tracked.
 node_modules/
 editor/dist/
 editor/node_modules/
 editor/test-results/
+editor/playwright-report/
+editor/.vite/
+
+# Xcode, Swift, and other compile products
 .DS_Store
+.AppleDouble
+._*
 xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM
+*.dSYM.zip
+*.xcarchive
+*.app
 DerivedData/
 .swiftpm/
 .build/
 build/
-server/tokenlibrary
 *.o
+*.profraw
+*.profdata
 coverage/
+
+# Go binaries. server/cmd/tokenlibrary is source and is not ignored.
+server/tokenlibrary
+*.exe
+*.test
+
 ui-prototype/
 .planning/

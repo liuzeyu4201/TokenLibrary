@@ -24,7 +24,17 @@ const source = document.getElementById('source');
 const rich = document.getElementById('rich');
 const preview = document.getElementById('preview');
 const status = document.getElementById('status');
+const footer = document.querySelector('footer');
 const errorBox = document.getElementById('error');
+function presentStatus(text) {
+  status.textContent = text;
+  if (!window.webkit || !footer) return;
+  const retry = document.getElementById('retry-save');
+  const help = document.getElementById('source-keyboard-help');
+  const needsBar = (retry && !retry.hidden) || (help && !help.hidden) || /失败|冲突/.test(text);
+  footer.hidden = !needsBar;
+}
+if (window.webkit && footer) footer.hidden = true;
 let markdown = '', mode = 'edit', crepe, ready = false, suppress = false, readOnly = false;
 let renderVersion = 0, diagramId = 0, richDiagramRequest = 0, pendingReplace, richMarkdown = '', saveFailed = false;
 let editBase = '', saveInFlight = null, saveSequence = 0, hasConflict = false;
@@ -39,7 +49,7 @@ const notify = value => {
   // Reassigning a textarea value during marked-text input can end the native
   // input method's composition. Ordinary source input already has this value.
   updateSourceValue(source,value);
-  status.textContent = sourceComposing ? '输入法正在组合文字…' : window.webkit ? '正在保存到本机…' : '浏览器预览 · 内容尚未写入资料库';
+  presentStatus(sourceComposing ? '输入法正在组合文字…' : window.webkit ? '正在保存到本机…' : '浏览器预览 · 内容尚未写入资料库');
   sendSave();
   window.dispatchEvent(new CustomEvent('tl-change', {detail: value}));
 };
@@ -76,8 +86,8 @@ window.tlSaveResult = (requestId, ok, canonical, message, durableConflict = fals
 };
 window.tlSaved = (ok, message, durableConflict = false) => {
   saveFailed = !ok && !durableConflict;hasConflict = durableConflict;
-  status.textContent = ok ? (sourceComposing ? '输入法正在组合文字…' : '已保存到本机') : durableConflict ? '冲突草稿已保存到本机' : '保存失败 · 内容仍在编辑器中';
   document.getElementById('retry-save').hidden = ok || durableConflict;
+  presentStatus(ok ? (sourceComposing ? '输入法正在组合文字…' : '已保存到本机') : durableConflict ? '冲突草稿已保存到本机' : '保存失败 · 内容仍在编辑器中');
   if (!ok) showError(message || '请保留当前页面并重试保存。');
   else clearError();
 };
@@ -183,6 +193,7 @@ function switchMode(next) {
   mode = next;
   rich.hidden = next !== 'edit'; source.hidden = next !== 'source'; preview.hidden = next !== 'read';
   document.getElementById('source-keyboard-help').hidden = next !== 'source';
+  presentStatus(status.textContent);
   document.getElementById('format-tools').hidden = next === 'read';
   document.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === next)));
   if (next === 'edit') setRich(markdown);
@@ -227,7 +238,7 @@ window.tlSetMarkdown = value => {
   if (/<!--\/?tl:|<(?:script|style|iframe)\b/i.test(value)) switchMode('source');
   else setRich(value);
   if (mode === 'read') renderPreview().catch(showError);
-  status.textContent = window.webkit ? '已载入本机内容' : '浏览器预览 · 内容尚未写入资料库';
+  presentStatus(window.webkit ? '已载入本机内容' : '浏览器预览 · 内容尚未写入资料库');
 };
 window.tlAcceptUpdate = (value, expected) => {
   if (sourceComposing) { deferredSourceRefresh={value,expected};return false; }

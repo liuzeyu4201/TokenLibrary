@@ -145,7 +145,7 @@ struct CatalogWorkspaceView: View {
                                                    query: filters.query(section: section, text: query, topicID: topicID), sort: sort)
         let response = searchResult?.request == request ? searchResult : nil
         return content(response)
-        .navigationTitle("个人资料库")
+        .navigationTitle("整理")
         .searchable(text: $query, prompt: "标题、作者、正文、摘录")
         .toolbar {
             Button { filtersPresented = true } label: {

@@ -579,15 +579,34 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(f.model.connectionError,connectionFailure)
     }
 
+    func testExistingLocalDocumentsOpenServerLoginInsteadOfTheLocalLibrary() throws {
+        let directory=FileManager.default.temporaryDirectory.appendingPathComponent("tokenlibrary-server-login-\(UUID().uuidString)")
+        let suite="app.tokenlibrary.server-login.\(UUID().uuidString)"
+        let preferences=try XCTUnwrap(UserDefaults(suiteName:suite))
+        defer { preferences.removePersistentDomain(forName:suite);try? FileManager.default.removeItem(at:directory) }
+        let local=try LibraryWorkspaceManager(baseDirectory:directory).localStore()
+        let note=LibraryDocument(id:UUID().uuidString.lowercased(),kind:.md,parentId:"root",name:"local.md",markdown:"kept on this device",
+                                  pdfPath:nil,revision:0,localGeneration:0,state:"active",purgeAt:nil,status:.savedLocal,annotationsJSON:"[]")
+        try local.saveDocument(note,enqueue:false)
+        let model=try AppModel(directory:directory,preferences:preferences,restoreSavedSession:true)
+        XCTAssertEqual(model.server,AppModel.defaultServerAddress)
+        XCTAssertFalse(model.offlineAccess,"local files must not hide the server login")
+        XCTAssertNil(model.session)
+        XCTAssertTrue(model.isLocalWorkspace)
+        model.useOffline()
+        XCTAssertTrue(model.offlineAccess)
+        XCTAssertEqual(try model.store.loadDocument(id:note.id)?.markdown,"kept on this device")
+    }
+
     func testWorkspaceStatusDistinguishesServerOfflineFromIndependentLocalLibrary() throws {
         let f=try Fixture();defer { f.clean() }
-        XCTAssertEqual(f.model.workspaceStatusTitle,"本机文档")
+        XCTAssertEqual(f.model.workspaceStatusTitle,"这台设备")
         f.model.isLocalWorkspace=false
-        XCTAssertEqual(f.model.workspaceStatusTitle,"服务器资料库（离线）")
+        XCTAssertEqual(f.model.workspaceStatusTitle,"资料库（离线）")
         f.model.session=LoginResult(sessionToken:"synthetic",epoch:"epoch",rootId:"root",libraryId:"test",deviceId:"test")
-        XCTAssertEqual(f.model.workspaceStatusTitle,"服务器资料库")
+        XCTAssertEqual(f.model.workspaceStatusTitle,"资料库")
         f.model.isLocalWorkspace=true
-        XCTAssertEqual(f.model.workspaceStatusTitle,"本机文档","a saved connection does not change which library is open")
+        XCTAssertEqual(f.model.workspaceStatusTitle,"这台设备","a saved connection does not change which library is open")
     }
 
     private func waitUntil(_ predicate: () -> Bool) async throws {

@@ -30,7 +30,7 @@ extension DocumentStore {
                 guard seen.insert(id).inserted else { continue }
                 let page = source.hasPrefix("pdf:") ? Int(source.dropFirst(4)) : nil
                 hits.append(LibrarySearchHit(objectId: id, excerpt: Self.searchExcerpt(text, query: query, tokens: tokens), pageIndex: page))
-                if hits.count >= min(limit,1_000) { break }
+                if hits.count >= min(limit, 1_001) { break }
             }
             return hits
         }

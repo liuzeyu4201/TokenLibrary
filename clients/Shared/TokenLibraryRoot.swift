@@ -42,6 +42,8 @@ enum LibraryVerificationConfiguration {
 
 @MainActor
 final class AppModel: ObservableObject {
+    /// Cloud library on mycloud. A previously saved address replaces it.
+    static let defaultServerAddress = "http://123.58.215.34"
     struct SourceReturnContext { let noteID:String;let sourceID:String }
     // A Debug-only isolated directory lets UI smoke tests avoid the user's library.
     private static var verificationDirectory: URL? {
@@ -100,6 +102,7 @@ final class AppModel: ObservableObject {
     @Published var query = "" { didSet { updateSearch() } }
     @Published var searchPresented = false
     @Published var searchResults:[LibrarySearchHit]=[]
+    @Published var searchTruncated=false
     @Published var searching=false
     @Published var searchCoverage:LibrarySearchCoverage?
     @Published var navigationSearch=""
@@ -112,7 +115,7 @@ final class AppModel: ObservableObject {
     @Published var currentFolder = "root" {
         didSet { preferences.set(currentFolder, forKey: "library.lastFolder") }
     }
-    @Published var folderName = "文档库"
+    @Published var folderName = "资料库"
     @Published var store: DocumentStore {
         didSet {
             // Reopening the same server library during login must keep its local error.
@@ -140,7 +143,8 @@ final class AppModel: ObservableObject {
         self.preferences=preferences
         appearanceStore=AppearanceStore(defaults:preferences)
         username=preferences.string(forKey:"connection.username") ?? "token"
-        server=preferences.string(forKey:"connection.server") ?? ""
+        let savedServer=preferences.string(forKey:"connection.server") ?? ""
+        server=savedServer.isEmpty ? Self.defaultServerAddress : savedServer
         deviceId=preferences.string(forKey:"connection.deviceId") ?? UUID().uuidString.lowercased()
         preferences.set(deviceId,forKey:"connection.deviceId")
         let directory = explicitDirectory ?? Self.verificationDirectory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -163,7 +167,8 @@ final class AppModel: ObservableObject {
                 try localStore.registerLegacyLibraryRoot(rootID:root,server:oldServer,libraryID:oldLibrary)
             } catch { reportLocal("恢复旧资料目录",error:error) }
         }
-        if restoreSavedSession,let url = try? ServerAddress.normalize(server) {
+        // Existing local files do not skip login. A saved connection opens its own library.
+        if restoreSavedSession,let url = try? ServerAddress.normalize(savedServer) {
             if let libraryId = preferences.string(forKey: "connection.libraryId"),
                let rootId = preferences.string(forKey: "connection.rootId") {
                 store = try workspaces.store(server:url,libraryId:libraryId)
@@ -174,8 +179,7 @@ final class AppModel: ObservableObject {
             }
         }
         reload()
-        if !documents.isEmpty { offlineAccess = true }
-        if restoreSavedSession, let url = try? ServerAddress.normalize(server) { restoreSession(from: url) }
+        if restoreSavedSession, let url = try? ServerAddress.normalize(savedServer) { restoreSession(from: url) }
     }
 
     private func cancelSessionRestore() {
@@ -345,7 +349,7 @@ final class AppModel: ObservableObject {
         stopSync()
         clearConnectionFeedback()
         store = localStore;isLocalWorkspace=true;currentFolder=DemoLibrary.rootId
-        selectedId=nil;folderName="本机文档";reload()
+        selectedId=nil;folderName="这台设备";reload()
     }
     func copyLocalDocumentsToConnectedLibrary() {
         guard !isLocalWorkspace,let session else { return }
@@ -366,7 +370,7 @@ final class AppModel: ObservableObject {
             clearConnectionFeedback()
             store = try workspaces.store(server:url,libraryId:session.libraryId)
             try store.bindWorkspace(server:url.absoluteString,libraryId:session.libraryId,rootId:session.rootId)
-            isLocalWorkspace=false;currentFolder=session.rootId;selectedId=nil;folderName="文档库"
+            isLocalWorkspace=false;currentFolder=session.rootId;selectedId=nil;folderName="资料库"
             reload();requestSync()
         } catch { reportLocal("打开资料库",error:error) }
     }
@@ -526,7 +530,7 @@ final class AppModel: ObservableObject {
             if connectionRunID == runID { connectionBusy = false; connectionRunID = nil; credentialNotice = nil }
         }
         guard !password.isEmpty else {
-            connectionError = "请输入密码后登录，也可以先使用本机文档。"
+            connectionError = "请输入密码后登录，也可以先只在这台设备上使用。"
             return
         }
         do {
@@ -572,7 +576,7 @@ final class AppModel: ObservableObject {
             password = ""
             offlineAccess = true
             currentFolder = r.rootId
-            folderName = "文档库"
+            folderName = "资料库"
             setConnectionBanner("已连接，正在同步资料与附件…")
             reload()
             requestSync()
@@ -596,7 +600,7 @@ final class AppModel: ObservableObject {
         password = ""
         offlineAccess = true
         connectionError = nil
-        guard let url else { setConnectionBanner("已退出。本机文档仍可继续编辑。"); return }
+        guard let url else { setConnectionBanner("已退出。这台设备上的资料仍可继续编辑。"); return }
         let runID = UUID(), access = credentials
         connectionRunID = runID; connectionBusy = true
         credentialNotice = "已停止同步，正在移除安全登录信息；本机资料可继续编辑。"
@@ -612,7 +616,7 @@ final class AppModel: ObservableObject {
                 if let token { try await access.delete(server: url, matchingSessionToken: token) }
                 let revoked = await serverLogout?.value ?? true
                 guard !Task.isCancelled, connectionRunID == runID else { return }
-                setConnectionBanner(revoked ? "已退出。本机文档仍可继续编辑。" : "安全登录信息已移除，本机文档仍可编辑。服务器会话撤销暂未确认。")
+                setConnectionBanner(revoked ? "已退出。这台设备上的资料仍可继续编辑。" : "安全登录信息已移除，这台设备上的资料仍可编辑。服务器会话撤销暂未确认。")
             } catch {
                 guard !Task.isCancelled, connectionRunID == runID else { return }
                 reportLocal("移除安全登录信息", error: error)
@@ -675,8 +679,8 @@ final class AppModel: ObservableObject {
     }
 
     var workspaceStatusTitle:String {
-        if isLocalWorkspace { return "本机文档" }
-        return session == nil ? "服务器资料库（离线）" : "服务器资料库"
+        if isLocalWorkspace { return "这台设备" }
+        return session == nil ? "资料库（离线）" : "资料库"
     }
 
     private func validName(_ name:String)->Bool { FileNames.isValidStoredName(name) }
@@ -845,18 +849,21 @@ final class AppModel: ObservableObject {
     func updateSearch() {
         searchTask?.cancel()
         let text=query.trimmingCharacters(in:.whitespacesAndNewlines)
-        guard !text.isEmpty else { searchResults=[];searchCoverage=nil;searching=false;return }
+        guard !text.isEmpty else { searchResults=[];searchTruncated=false;searchCoverage=nil;searching=false;return }
         searching=true
         let currentStore=store
         searchTask=Task {
             do {
                 try await Task.sleep(for:.milliseconds(150))
                 let (hits,coverage)=try await Task.detached(priority:.userInitiated) {
-                    (try currentStore.searchDetails(query:text,limit:1000),try currentStore.searchCoverage())
+                    (try currentStore.searchDetails(query:text,limit:1_001),try currentStore.searchCoverage())
                 }.value
                 try Task.checkCancellation()
                 guard currentStore === store,query.trimmingCharacters(in:.whitespacesAndNewlines) == text else { return }
-                searchResults=hits;searchCoverage=coverage;searching=false
+                searchTruncated=hits.count > 1_000
+                searchResults=searchTruncated ? Array(hits.prefix(1_000)) : hits
+                searchCoverage=coverage
+                searching=false
             } catch is CancellationError { }
             catch {
                 guard !Task.isCancelled,currentStore === store,query.trimmingCharacters(in:.whitespacesAndNewlines) == text else { return }
@@ -908,16 +915,16 @@ final class AppModel: ObservableObject {
     }
 
     func rootTitle(_ root: String) -> String {
-        if root == DemoLibrary.rootId { return "本机文档" }
-        if root == session?.rootId { return "已连接的文档库" }
-        return "已保存资料库 · \(root.prefix(6))"
+        if root == DemoLibrary.rootId { return "这台设备" }
+        if root == session?.rootId { return "已同步" }
+        return "已保存 · \(root.prefix(6))"
     }
 
     func goUp() {
         guard !isAtRoot else { return }
         if let cur = documents.first(where: { $0.id == currentFolder }) {
             currentFolder = cur.parentId
-            folderName = documents.first(where: { $0.id == cur.parentId })?.name ?? "文档库"
+            folderName = documents.first(where: { $0.id == cur.parentId })?.name ?? "资料库"
             reload()
         }
     }
@@ -972,7 +979,7 @@ struct LoginView: View {
                 .frame(maxWidth: 280)
                 .accessibilityLabel("TokenLibrary")
             Text("TokenLibrary").font(.largeTitle.bold())
-            Text("个人文档库，两端共用同一账号").foregroundStyle(.secondary)
+            Text("个人资料库，Mac 和 iPhone 用同一个账号").foregroundStyle(.secondary)
             TextField("服务器地址，例如 https://library.example.com", text: $model.server)
                 .textFieldStyle(.roundedBorder)
                 .autocorrectionDisabled().disabled(model.connectionBusy)
@@ -994,9 +1001,15 @@ struct LoginView: View {
                 }
             }
             CredentialWaitingNotice(model: model)
-            Button("使用本机文档") { model.useOffline() }
+            Button("只在这台设备上使用") { model.useOffline() }
                 .buttonStyle(InkButtonStyle())
-            Text("测试连接不会发送密码。本机文档无需联网即可打开。")
+            Text("登录后，Mac 和 iPhone 会同步同一份资料库。")
+                .font(.caption).foregroundStyle(.secondary)
+            if model.isLocalWorkspace && model.documents.contains(where: { $0.state == "active" && $0.kind != .folder }) {
+                Text("这台设备上已有资料。登录后进入已同步的资料库；原来的仍可从「只在这台设备上使用」打开，也可在设置里复制过去。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("测试连接不会发送密码。")
                 .font(.caption).foregroundStyle(.secondary)
             Text("不提供注册").font(.footnote).foregroundStyle(.secondary)
             if !model.banner.isEmpty {
@@ -1084,8 +1097,9 @@ struct LibraryView: View {
     }
     @ObservedObject var model: AppModel
     @State private var utilitySheet: UtilitySheet?
-    @State private var preferredCompactColumn: NavigationSplitViewColumn = .sidebar
     @State private var importPicker = LibraryImportPickerState()
+    @State private var shownFolders = 24
+    @State private var shownBooks = 48
     @State private var markdownFolder:URL?
     @State private var folderCandidates:[URL]=[]
     @State private var folderAccessing=false
@@ -1095,23 +1109,66 @@ struct LibraryView: View {
         let shown=Set(model.visibleDocs().map(\.id))
         return model.unresolvedDocuments.filter { !shown.contains($0.id) }
     }
+    private var shelfFolders: [LibraryDocument] { model.visibleDocs().filter { $0.kind == .folder } }
+    private var shelfBooks: [LibraryDocument] { model.visibleDocs().filter { $0.kind != .folder } }
+    private var openDocument: LibraryDocument? {
+        guard let document = model.selected, document.kind != .folder else { return nil }
+        return document
+    }
+    private var shelfAnimation: Animation { .spring(response: 0.46, dampingFraction: 0.88) }
+    private var libraryNoticeVisible: Bool {
+        !model.unresolvedDocuments.isEmpty
+            || (!model.query.isEmpty && model.searchCoverage != nil)
+            || model.localOperationError != nil
+            || model.credentialNotice != nil
+            || model.connectionError != nil
+    }
     var body: some View {
       let pickerRequest = importPicker.request
       return VStack(spacing:0) {
-        NavigationSplitView(preferredCompactColumn: $preferredCompactColumn) {
-            List(selection: Binding(get: { model.selectedId }, set: model.selectLibraryRow)) {
-                ForEach(model.visibleDocs(), id: \.id) { doc in
-                    libraryRow(doc)
-                }
-                if !unresolvedRows.isEmpty {
-                    Section("待恢复位置的旧资料") {
-                        ForEach(unresolvedRows,id:\.id) { libraryRow($0) }
+        NavigationStack {
+          ZStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 36) {
+                    shelfCaption
+                    if !shelfFolders.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("文件夹").font(.caption).foregroundStyle(.secondary)
+                            LazyVGrid(columns: foldColumns, spacing: 28) {
+                                ForEach(shelfFolders.prefix(shownFolders), id: \.id) { foldedFolder($0) }
+                            }
+                            remainderButton(remaining: shelfFolders.count - min(shownFolders, shelfFolders.count), noun: "个文件夹") { shownFolders += 24 }
+                        }
+                    }
+                    if !shelfBooks.isEmpty {
+                        LazyVGrid(columns: bookColumns, spacing: 22) {
+                            ForEach(shelfBooks.prefix(shownBooks), id: \.id) { bookCard($0) }
+                        }
+                        remainderButton(remaining: shelfBooks.count - min(shownBooks, shelfBooks.count), noun: "本") { shownBooks += 48 }
+                    }
+                    if !unresolvedRows.isEmpty {
+                        VStack(alignment: .leading, spacing: 14) {
+                            Text("待恢复位置").font(.caption).foregroundStyle(.secondary)
+                            LazyVGrid(columns: bookColumns, spacing: 22) {
+                                ForEach(unresolvedRows.prefix(shownBooks), id: \.id) { bookCard($0) }
+                            }
+                        }
                     }
                 }
+                .padding(28)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .id(model.currentFolder)
+                .transition(.modifier(
+                    active: PaperFold(angle: 72, opacity: 0.15),
+                    identity: PaperFold(angle: 0, opacity: 1)
+                ))
             }
+            .animation(shelfAnimation, value: model.currentFolder)
+            .onChange(of: model.currentFolder) { _, _ in shownFolders = 24; shownBooks = 48 }
+            .onChange(of: model.query) { _, _ in shownFolders = 24; shownBooks = 48 }
             .overlay {
                 if model.visibleDocs().isEmpty && unresolvedRows.isEmpty {
-                    if model.searching { ProgressView("正在搜索本机资料…") }
+                    if model.searching { ProgressView("正在搜索…") }
                     else {
                         ContentUnavailableView {
                             VStack(spacing: 14) {
@@ -1120,16 +1177,15 @@ struct LibraryView: View {
                                 } else {
                                     InkGlyph(name: "magnifyingglass").frame(width: 40, height: 40)
                                 }
-                                Text(model.query.isEmpty ? "这里还没有文档" : "没有找到匹配的文档").font(.title3.weight(.semibold))
+                                Text(model.query.isEmpty ? "这里还没有书" : "没有找到这本书").font(.title3.weight(.semibold))
                             }
                         } description: {
-                            Text(model.query.isEmpty ? "新建笔记，或导入 Markdown 和 PDF 开始整理。" : "试试其他标题或正文关键词。")
+                            Text(model.query.isEmpty ? "从「添加」新建笔记，或导入 Markdown 和 PDF。" : "试试其他标题或正文关键词。")
                         }
                     }
                 }
             }
-            .searchable(text: $model.query, isPresented: $model.searchPresented)
-            .navigationSplitViewColumnWidth(min:240,ideal:300,max:420)
+            .searchable(text: $model.query, isPresented: $model.searchPresented, prompt: "在资料库中查找")
             .navigationTitle(model.folderName)
             .navigationBarBackButtonHidden(!model.isAtRoot)
             .toolbar {
@@ -1138,101 +1194,91 @@ struct LibraryView: View {
                         Button(action: model.goUp) {
                             InkGlyph(name: "chevron.left")
                                 .frame(width: 16, height: 16)
-                                .accessibilityLabel("返回上级")
+                                .accessibilityLabel("返回上一级")
                         }
                     }
                 }
                 ToolbarItemGroup(placement: .automatic) {
-                Menu("新建") {
-                    Button {
-                        model.newNote()
-                    } label: {
-                        Label("笔记", ink: "doc.richtext")
+                    Menu("添加") {
+                        Button("笔记") { model.newNote() }
+                        Button("文件夹") { model.newFolder() }
+                        Divider()
+                        Button("导入 Markdown 或 PDF") { beginImport(.files) }
+                        Button("导入带附件的笔记") { beginImport(.markdownFolder) }
                     }
-                    Button {
-                        model.newFolder()
-                    } label: {
-                        Label("文件夹", ink: "folder")
-                    }
-                }
-                Menu("导入") {
-                    Button("Markdown 或 PDF 文件") { beginImport(.files) }
-                    Button("含附件的 Markdown（选择文件夹）") { beginImport(.markdownFolder) }
-                }
-                Button("资料库") { model.catalogPresented = true }
-                Menu {
-                    if model.session == nil {
-                        Button("连接服务器") { model.showConnection() }
-                    } else {
-                        Button("立即同步") { model.requestSync() }.disabled(model.syncing)
-                    }
-                    Button("本机文档") { model.showLocalLibrary() }
-                    if model.session != nil { Button("已连接的资料库") { model.showConnectedLibrary() } }
-                    Menu("当前库的根目录") {
-                        ForEach(model.savedRoots, id: \.self) { root in
-                            Button(model.rootTitle(root)) {
-                                model.currentFolder = root
-                                model.folderName = model.rootTitle(root)
-                                model.selectedId = nil
+                    Menu {
+                        Button("整理") { model.catalogPresented = true }
+                        Button("回收站") { utilitySheet = .trash }
+                        Button("冲突与恢复草稿") { utilitySheet = .conflicts }
+                        Button("设置") { utilitySheet = .settings }
+                        Divider()
+                        if model.session == nil {
+                            Button("登录并同步") { model.showConnection() }
+                        }
+                        if model.isLocalWorkspace {
+                            if model.session != nil { Button("打开已同步的资料库") { model.showConnectedLibrary() } }
+                        } else {
+                            Button("只看这台设备") { model.showLocalLibrary() }
+                        }
+                        if model.savedRoots.count > 1 {
+                            Menu("其他位置") {
+                                ForEach(model.savedRoots, id: \.self) { root in
+                                    Button(model.rootTitle(root)) {
+                                        model.currentFolder = root
+                                        model.folderName = model.rootTitle(root)
+                                        model.selectedId = nil
+                                    }
+                                }
                             }
                         }
+                    } label: {
+                        InkGlyph(name: "ellipsis.circle").frame(width: 22, height: 22)
                     }
-                    Button("回收站") { utilitySheet = .trash }
-                    Button("冲突与恢复草稿") { utilitySheet = .conflicts }
-                    Button("设置") { utilitySheet = .settings }
-                } label: {
-                    InkGlyph(name: "ellipsis.circle").frame(width: 22, height: 22)
-                }
                 }
             }
-        } detail: {
-            if let doc = model.selected, doc.kind != .folder {
-                if doc.kind == .pdf {
-                    PDFReaderView(documentId:doc.id,model:model,store:model.store)
-                        .id(model.store.root.path+"/"+doc.id)
-                } else {
-                    EditorScreen(docId:doc.id,model:model,store:model.store)
-                        .id(model.store.root.path+"/"+doc.id)
-                }
-            } else {
-                Text("选择一篇文档")
+            .scaleEffect(openDocument == nil ? 1 : 0.975)
+            .opacity(openDocument == nil ? 1 : 0)
+            .allowsHitTesting(openDocument == nil)
+            .accessibilityHidden(openDocument != nil)
+            if let document = openDocument {
+              readingSurface(document)
+                .transition(.asymmetric(
+                  insertion: .move(edge: .trailing).combined(with: .opacity),
+                  removal: .move(edge: .trailing).combined(with: .opacity)
+                ))
+                .zIndex(1)
             }
+          }
+          .animation(shelfAnimation, value: openDocument?.id)
+          .background(LibraryPalette.paper)
         }
+        if libraryNoticeVisible {
             VStack(alignment: .leading, spacing: 6) {
                 if !model.unresolvedDocuments.isEmpty {
                     Text("\(model.unresolvedDocuments.count) 项旧资料的目录位置待恢复。可在根目录查看和导出，原内容和未提交操作已保留。")
                         .foregroundStyle(.secondary)
                 }
                 if !model.query.isEmpty,let coverage=model.searchCoverage { Text(coverage.summary).foregroundStyle(.secondary).accessibilityLabel(coverage.summary) }
-                HStack {
-                    if model.syncing { ProgressView().controlSize(.small) }
-                    Text(model.syncing ? "正在同步资料与附件…" : model.workspaceStatusTitle)
-                    Spacer()
-                    Text("待提交 \(model.pendingCount) 项")
-                    if model.session == nil {
-                        Button("连接") { model.showConnection() }
-                    } else {
-                        Button(model.connectionError == nil ? "立即同步" : "重试同步") { model.requestSync() }.disabled(model.syncing)
-                    }
-                }
                 if let error = model.localOperationError {
                     HStack(alignment:.top) {
                         Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth:.infinity,alignment:.leading)
                         Button { model.dismissLocalOperationError() } label: {
                             InkGlyph(name: "xmark.circle").frame(width: 16, height: 16)
                         }.accessibilityLabel("关闭本地操作错误提示")
-                            .accessibilityLabel("关闭本地操作错误提示")
                     }
                 }
                 CredentialWaitingNotice(model: model)
                 if let error = model.connectionError {
-                    Text(error).foregroundStyle(.red).textSelection(.enabled)
-                } else if !model.banner.isEmpty {
-                    Text(model.banner).foregroundStyle(.secondary)
+                    HStack(alignment: .top) {
+                        Text(error).foregroundStyle(.red).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+                        if model.session != nil {
+                            Button("重试") { model.requestSync() }.disabled(model.syncing)
+                        }
+                    }
                 }
-                if let success=model.lastSyncAt { Text("最近同步成功：\(success.formatted(date:.abbreviated,time:.standard))").foregroundStyle(.secondary) }
             }
             .font(.caption).padding(12).background(.regularMaterial)
+            }
         }
         .fileImporter(isPresented: $importPicker.isPresented,
                       allowedContentTypes: pickerRequest?.mode.allowedContentTypes ?? LibraryImportPickerState.Mode.files.allowedContentTypes,
@@ -1314,6 +1360,32 @@ struct LibraryView: View {
         } message: { Text(model.importNotice ?? "") }
     }
 
+    private func closeReading() {
+        withAnimation(shelfAnimation) { model.selectedId = nil }
+    }
+
+    @ViewBuilder
+    private func readingSurface(_ document: LibraryDocument) -> some View {
+        Group {
+            if document.kind == .pdf {
+                PDFReaderView(documentId: document.id, model: model, store: model.store)
+            } else {
+                EditorScreen(docId: document.id, model: model, store: model.store)
+            }
+        }
+        .id(model.store.root.path + "/" + document.id)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(LibraryPalette.paper)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: closeReading) {
+                    Label("资料库", ink: "chevron.left")
+                }
+                .accessibilityLabel("返回资料库")
+            }
+        }
+    }
+
     private func beginImport(_ mode: LibraryImportPickerState.Mode) {
         guard markdownFolder == nil else { return }
         importPicker.present(mode, store: model.store, parentID: model.currentFolder)
@@ -1352,68 +1424,118 @@ struct LibraryView: View {
         folderAccessing=false;markdownFolder=nil;folderCandidates=[];folderImportRequest=nil
     }
 
-    @ViewBuilder
-    func libraryRow(_ doc: LibraryDocument) -> some View {
-        Group {
-            if doc.kind == .folder {
-                Button {
-                    model.openFolder(doc)
-                } label: {
-                    Label(doc.name, ink: "folder").frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle()).padding(.vertical, 4)
-                }
-                .buttonStyle(.plain)
-            } else if model.isSelectedPDFSearchResult(doc.id) {
-                Button {
-                    if model.activateSelectedPDFSearchResult(doc.id) {
-                        // On a phone, repeating a result after Back also opens
-                        // the existing detail instead of leaving it offscreen.
-                        preferredCompactColumn = .detail
-                    }
-                } label: { documentRowLabel(doc) }
-                .buttonStyle(.plain)
-                .tag(doc.id)
+    private var shelfCaption: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if model.searchTruncated {
+                Text("只列出前 1000 本。换一个更具体的词，才能看到其余的。")
+            } else if model.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(model.isLocalWorkspace ? "这些书只留在这台设备，不会同步。" : "选择一本，进入阅读。")
             } else {
-                NavigationLink(value: doc.id) {
-                    documentRowLabel(doc)
-                }
+                Text("搜索结果")
             }
         }
-        .contextMenu { docMenu(doc) }
-        .swipeActions(edge: .leading, allowsFullSwipe: false) {
-            Button { model.moveTarget = doc } label: {
-                Label("移动到…", ink: "folder")
-            }
-            .tint(.accentColor)
-            .accessibilityIdentifier("move-document-" + doc.id)
-        }
-        .accessibilityAction(named: Text("移动到…")) { model.moveTarget = doc }
-        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button("删除", role: .destructive) { model.delete(doc) }
-            Button("重命名") { model.beginRename(doc) }
-        }
-        .draggable(doc.id)
-        .dropDestination(for: String.self) { ids, _ in
-            model.drop(ids, onto: doc)
+        .font(.subheadline)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private func remainderButton(remaining: Int, noun: String, advance: @escaping () -> Void) -> some View {
+        if remaining > 0 {
+            Button("还有 \(remaining) \(noun)") { advance() }
+                .buttonStyle(InkButtonStyle())
         }
     }
 
-    private func documentRowLabel(_ doc:LibraryDocument)->some View {
-        HStack(alignment: .top, spacing: 10) {
-            InkGlyph(name: doc.kind == .pdf ? "doc.text.magnifyingglass" : "note.text")
-                .frame(width: 22, height: 22)
-                .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(doc.name).lineLimit(2)
-                Text(doc.status.rawValue).font(.caption).foregroundStyle(.secondary)
-                if doc.catalog.archived { Label("已归档", ink: "archivebox").font(.caption).foregroundStyle(.secondary) }
-                if !model.query.isEmpty,let hit=model.searchResults.first(where:{$0.objectId == doc.id}) {
-                    Text(hit.excerpt).font(.caption).lineLimit(3).foregroundStyle(.secondary)
-                    Text(model.folderBreadcrumb(doc)+(hit.pageIndex.map { " · 第 \($0+1) 页" } ?? "")).font(.caption2).foregroundStyle(.secondary)
+    private var foldColumns: [GridItem] { [GridItem(.adaptive(minimum: 180, maximum: 240), spacing: 28)] }
+    private var bookColumns: [GridItem] { [GridItem(.adaptive(minimum: 140, maximum: 180), spacing: 22)] }
+
+    private func foldedFolder(_ doc: LibraryDocument) -> some View {
+        Button {
+            withAnimation(shelfAnimation) { _ = model.openFolder(doc) }
+        } label: {
+            ZStack(alignment: .topLeading) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(LibraryPalette.ink.opacity(0.08))
+                    .frame(height: 108)
+                    .offset(x: 10, y: 14)
+                VStack(spacing: 0) {
+                    Text(doc.name)
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(LibraryPalette.ink.opacity(0.06))
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous))
+                        .overlay(alignment: .bottom) { Rectangle().fill(LibraryPalette.ink.opacity(0.22)).frame(height: 1) }
+                    ZStack(alignment: .bottomLeading) {
+                        UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0, style: .continuous)
+                            .fill(LibraryPalette.paper)
+                            .overlay(UnevenRoundedRectangle(topLeadingRadius: 0, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 0, style: .continuous).stroke(LibraryPalette.ink.opacity(0.16), lineWidth: 1))
+                        Text("展开")
+                            .font(.caption2)
+                            .foregroundStyle(LibraryPalette.ink.opacity(0.55))
+                            .padding(12)
+                    }
+                    .frame(height: 78)
+                    .rotation3DEffect(.degrees(34), axis: (x: 1, y: 0, z: 0), anchor: .top, anchorZ: 0, perspective: 0.5)
+                    .shadow(color: LibraryPalette.ink.opacity(0.12), radius: 8, y: 10)
+                }
+                .background(alignment: .top) {
+                    UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous)
+                        .fill(LibraryPalette.paper)
+                        .frame(height: 42)
+                        .overlay(UnevenRoundedRectangle(topLeadingRadius: 12, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 12, style: .continuous).stroke(LibraryPalette.ink.opacity(0.2), lineWidth: 1))
                 }
             }
+            .frame(height: 132)
+            .padding(.bottom, 18)
         }
-        .padding(.vertical, 4)
-        .frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .contextMenu { docMenu(doc) }
+        .dropDestination(for: String.self) { ids, _ in model.drop(ids, onto: doc) }
+        .accessibilityLabel(doc.name)
+        .accessibilityHint("展开这个文件夹")
+    }
+
+    private func bookCard(_ doc: LibraryDocument) -> some View {
+        let excerpt = model.query.isEmpty ? nil : model.searchResults.first(where: { $0.objectId == doc.id })?.excerpt
+        return Button {
+            withAnimation(shelfAnimation) {
+                if !model.activateSelectedPDFSearchResult(doc.id) { model.selectLibraryRow(doc.id) }
+            }
+        } label: {
+            HStack(spacing: 0) {
+                Rectangle().fill(LibraryPalette.ink).frame(width: 14)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(doc.name)
+                        .font(.system(.headline, design: .serif))
+                        .foregroundStyle(LibraryPalette.ink)
+                        .lineLimit(4)
+                        .multilineTextAlignment(.leading)
+                    Spacer(minLength: 0)
+                    if let excerpt {
+                        Text(excerpt).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Text(doc.kind == .pdf ? "PDF" : "笔记")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(LibraryPalette.ink.opacity(0.7))
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+            .frame(width: 132, height: excerpt == nil ? 188 : 210)
+            .background(LibraryPalette.paper)
+            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 4, style: .continuous).stroke(LibraryPalette.ink.opacity(0.22), lineWidth: 1))
+            .shadow(color: LibraryPalette.ink.opacity(0.16), radius: 7, x: 0, y: 5)
+        }
+        .buttonStyle(.plain)
+        .contextMenu { docMenu(doc) }
+        .draggable(doc.id)
+        .accessibilityIdentifier("move-document-" + doc.id)
+        .accessibilityLabel(doc.name)
+        .accessibilityHint(doc.kind == .pdf ? "打开这本 PDF" : "打开这本笔记")
     }
 
     @ViewBuilder
@@ -1423,6 +1545,20 @@ struct LibraryView: View {
         if doc.kind == .md { Button("导出 Markdown 与附件") { model.prepareExport(doc) } }
         if doc.kind == .pdf { Button("导出含批注 PDF") { model.prepareExport(doc) } }
         Button("删除", role: .destructive) { model.delete(doc) }
+    }
+}
+
+private struct PaperFold: ViewModifier, @MainActor Animatable {
+    var angle: Double
+    var opacity: Double
+    var animatableData: AnimatablePair<Double, Double> {
+        get { AnimatablePair(angle, opacity) }
+        set { angle = newValue.first; opacity = newValue.second }
+    }
+    func body(content: Content) -> some View {
+        content
+            .rotation3DEffect(.degrees(angle), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.5)
+            .opacity(opacity)
     }
 }
 
@@ -2007,14 +2143,14 @@ struct SettingsView: View {
                 if model.session != nil {
                     Button("退出登录") { model.logout() }
                 } else {
-                    Button("连接服务器") { model.showConnection() }
+                    Button("登录并同步") { model.showConnection() }
                 }
             }
             if !model.isLocalWorkspace && model.session != nil {
-                Section("本机资料") {
-                    Text("将原有本机资料和附件复制到当前连接的资料库，保留原副本。重复复制会生成新的副本。")
+                Section("这台设备上的资料") {
+                    Text("复制到已同步的资料库，这台设备上的原件保留。再复制一次会多一份。")
                         .font(.caption).foregroundStyle(.secondary)
-                    Button("复制本机资料到当前库") { model.copyLocalDocumentsToConnectedLibrary() }.disabled(model.syncing)
+                    Button("复制到已同步的资料库") { model.copyLocalDocumentsToConnectedLibrary() }.disabled(model.syncing)
                 }
             }
             Section("风格") {
@@ -2034,7 +2170,7 @@ struct SettingsView: View {
                 Text("资料先保存到本机；联网时自动同步。维护或连接失败时可继续编辑。")
                     .font(.caption).foregroundStyle(.secondary)
                 if model.session != nil {
-                    Button("立即同步") { model.requestSync() }.disabled(model.syncing)
+                    Button("现在同步一次") { model.requestSync() }.disabled(model.syncing)
                 }
             }
         }
