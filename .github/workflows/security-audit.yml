@@ -1,0 +1,51 @@
+name: Security audit
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      AUDIT_OUTPUT: ${{ runner.temp }}/security-audit-tokenlibrary
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Grok
+        run: |
+          curl -fsSL https://x.ai/cli/install.sh | bash
+          echo "$HOME/.grok/bin" >> "$GITHUB_PATH"
+
+      - name: Run security audit
+        env:
+          XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+        run: |
+          if [ -z "$XAI_API_KEY" ]; then
+            echo "XAI_API_KEY is not set. Add it under GitHub Settings, Secrets and variables, Actions."
+            exit 1
+          fi
+          mkdir -p "$AUDIT_OUTPUT"
+          prompt=$(sed "s#__AUDIT_OUTPUT__#$AUDIT_OUTPUT#g" .github/security-audit-prompt.txt)
+          grok -p "$prompt" --yolo --cwd "$GITHUB_WORKSPACE"
+
+      - name: Check confirmed high findings
+        if: always()
+        run: node .github/scripts/check-security-audit.mjs "$AUDIT_OUTPUT/findings.json"
+
+      - name: Upload audit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit
+          path: ${{ runner.temp }}/security-audit-tokenlibrary
+          if-no-files-found: warn

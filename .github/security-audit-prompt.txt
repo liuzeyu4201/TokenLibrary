@@ -1,0 +1,11 @@
+Run a full security audit of this repository. This is an explicit end-to-end security audit: use full audit mode and write the report artifacts.
+
+Profile: quick.
+Scope paths: server/ and deploy/ only. Record every other path as out of scope.
+Budget: 16 agent invocations.
+Skill directory: the absolute path of third-party/security-audit-skill/skills/security-audit in this checkout.
+Target: this repository root.
+Output directory: __AUDIT_OUTPUT__
+This output directory is outside the repository. Write run-metadata.json, architecture.md, coverage-ledger.json, findings.json, REPORT.md, FINDINGS-DETAIL.md, and NEEDS-VALIDATION.md only there.
+
+Do not modify, commit, or push any file in the repository. Do not probe deployed or shared services. Use Node for validate-findings.cjs and validate-coverage-ledger.cjs. If the runner cannot provide the required OS sandbox, leave runtime checks as needs_validation instead of executing target code.

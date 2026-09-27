@@ -15,6 +15,7 @@
 - [公开命令](#公开命令)
 - [文档](#文档)
 - [安全](#安全)
+- [安全审计](#安全审计)
 - [许可](#许可)
 
 ## 现在做到哪一步
@@ -63,6 +64,7 @@ make start
 
 ```text
 .
+├── .github                 # security-audit 持续检查
 ├── LICENSE                 # 本仓库代码与文档的 MIT 许可
 ├── assets                  # README 封面
 ├── clients                 # iOS / macOS、Shared、LibraryCore、打进 App 的编辑器
@@ -118,6 +120,14 @@ make start
 ## 安全
 
 真实配置只放在被忽略的 `.env`。`.env.example` 里的数据库口令、管理员口令哈希和上传令牌哈希留空。文档不写密码、会话 Token、真实服务器密钥或用户资料。
+
+## 安全审计
+
+打开 pull request，或在 GitHub Actions 里手动运行 Security audit 时，用 `security-audit` 对 `server/` 和 `deploy/` 做一档 `quick` 审计。代理调用上限是 16。报告上传为名为 `security-audit` 的构建产物，不写入仓库。
+
+`confirmed` 且严重程度为 `high` 或 `critical` 时，这次检查失败。`needs_validation`、`rejected`，以及没有写出 `findings.json` 的未完成运行，不因此失败。来自其他仓库的 pull request 不运行这条检查。托管 runner 提供不了该技能要求的系统级沙箱，所以运行目标程序的检查会留在 `needs_validation`。
+
+同仓库运行需要 Actions secret `XAI_API_KEY`。没有这把密钥时，检查失败。
 
 ## 许可
 
