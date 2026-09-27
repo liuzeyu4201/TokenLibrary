@@ -1,0 +1,424 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		BC0000000000000000000050 /* CatalogActionFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000050; };
+		BD0000000000000000000050 /* CatalogActionFeedback.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000050; };
+		BB0000000000000000000001 /* TokenLibraryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000001 /* TokenLibraryApp.swift */; };
+		BB0000000000000000000002 /* TokenLibraryRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* TokenLibraryRoot.swift */; };
+		BB0000000000000000000003 /* PDFAnnotator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* PDFAnnotator.swift */; };
+		BB0000000000000000000004 /* ExportGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* ExportGlyph.swift */; };
+		BB0000000000000000000006 /* StickyNoteEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* StickyNoteEditor.swift */; };
+		BB0000000000000000000011 /* TokenLibraryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000002 /* TokenLibraryApp.swift */; };
+		BB0000000000000000000012 /* TokenLibraryRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000003 /* TokenLibraryRoot.swift */; };
+		BB0000000000000000000013 /* PDFAnnotator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000004 /* PDFAnnotator.swift */; };
+		BB0000000000000000000014 /* ExportGlyph.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000005 /* ExportGlyph.swift */; };
+		BB0000000000000000000016 /* StickyNoteEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* StickyNoteEditor.swift */; };
+		BB0000000000000000000021 /* LibraryCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE0000000000000000000001 /* LibraryCore */; };
+		BB0000000000000000000022 /* LibraryCore in Frameworks */ = {isa = PBXBuildFile; productRef = EE0000000000000000000002 /* LibraryCore */; };
+		BB0000000000000000000031 /* editor in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* editor */; };
+		BB0000000000000000000032 /* editor in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* editor */; };
+		BB0000000000000000000040 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000040 /* Assets.xcassets */; };
+		BB0000000000000000000041 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000040 /* Assets.xcassets */; };
+		BC0000000000000000000007 = {isa = PBXBuildFile; fileRef = AA0000000000000000000007; };
+		BD0000000000000000000007 = {isa = PBXBuildFile; fileRef = AA0000000000000000000007; };
+		BC0000000000000000000008 = {isa = PBXBuildFile; fileRef = AA0000000000000000000008; };
+		BD0000000000000000000008 = {isa = PBXBuildFile; fileRef = AA0000000000000000000008; };
+		BC0000000000000000000009 = {isa = PBXBuildFile; fileRef = AA0000000000000000000009; };
+		BD0000000000000000000009 = {isa = PBXBuildFile; fileRef = AA0000000000000000000009; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000000000000000000050 /* CatalogActionFeedback.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogActionFeedback.swift; sourceTree = "<group>"; };
+		AA0000000000000000000001 /* TokenLibraryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenLibraryApp.swift; sourceTree = "<group>"; };
+		AA0000000000000000000002 /* TokenLibraryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenLibraryApp.swift; sourceTree = "<group>"; };
+		AA0000000000000000000003 /* TokenLibraryRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenLibraryRoot.swift; sourceTree = "<group>"; };
+		AA0000000000000000000004 /* PDFAnnotator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFAnnotator.swift; sourceTree = "<group>"; };
+		AA0000000000000000000005 /* ExportGlyph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportGlyph.swift; sourceTree = "<group>"; };
+		AA0000000000000000000006 /* StickyNoteEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StickyNoteEditor.swift; sourceTree = "<group>"; };
+		AA0000000000000000000010 /* TokenLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TokenLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000011 /* TokenLibrary.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TokenLibrary.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000020 /* LibraryCore */ = {isa = PBXFileReference; lastKnownFileType = folder; path = LibraryCore; sourceTree = "<group>"; };
+		AA0000000000000000000031 /* editor */ = {isa = PBXFileReference; lastKnownFileType = folder; path = editor; sourceTree = "<group>"; };
+		AA0000000000000000000040 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA0000000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditorWebView.swift; sourceTree = "<group>"; };
+		AA0000000000000000000008 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogViews.swift; sourceTree = "<group>"; };
+		AA0000000000000000000009 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConflictResolutionView.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		DD0000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000021 /* LibraryCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000022 /* LibraryCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		CC0000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				CC0000000000000000000002 /* iOS */,
+				CC0000000000000000000003 /* macOS */,
+				CC0000000000000000000004 /* Shared */,
+				AA0000000000000000000020 /* LibraryCore */,
+				AA0000000000000000000031 /* editor */,
+				AA0000000000000000000040 /* Assets.xcassets */,
+				CC0000000000000000000005 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		CC0000000000000000000002 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000001 /* TokenLibraryApp.swift */,
+			);
+			path = iOS;
+			sourceTree = "<group>";
+		};
+		CC0000000000000000000003 /* macOS */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000002 /* TokenLibraryApp.swift */,
+			);
+			path = macOS;
+			sourceTree = "<group>";
+		};
+		CC0000000000000000000004 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000003 /* TokenLibraryRoot.swift */,
+				AA0000000000000000000004 /* PDFAnnotator.swift */,
+				AA0000000000000000000005 /* ExportGlyph.swift */,
+				AA0000000000000000000006 /* StickyNoteEditor.swift */,
+				AA0000000000000000000009 /* ConflictResolutionView.swift */,
+				AA0000000000000000000008 /* CatalogViews.swift */,
+				AA0000000000000000000050 /* CatalogActionFeedback.swift */,
+				AA0000000000000000000007 /* EditorWebView.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		CC0000000000000000000005 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AA0000000000000000000010 /* TokenLibrary.app */,
+				AA0000000000000000000011 /* TokenLibrary.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		0A100000000000000000000B /* TokenLibrary-iOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A1000000000000000000002 /* Build configuration list for PBXNativeTarget "TokenLibrary-iOS" */;
+			buildPhases = (
+				DD0000000000000000000011 /* Sources */,
+				DD0000000000000000000001 /* Frameworks */,
+				DD0000000000000000000021 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "TokenLibrary-iOS";
+			packageProductDependencies = (
+				EE0000000000000000000001 /* LibraryCore */,
+			);
+			productName = TokenLibrary;
+			productReference = AA0000000000000000000010 /* TokenLibrary.app */;
+			productType = "com.apple.product-type.application";
+		};
+		0A100000000000000000000C /* TokenLibrary-macOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0A1000000000000000000003 /* Build configuration list for PBXNativeTarget "TokenLibrary-macOS" */;
+			buildPhases = (
+				DD0000000000000000000012 /* Sources */,
+				DD0000000000000000000002 /* Frameworks */,
+				DD0000000000000000000022 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "TokenLibrary-macOS";
+			packageProductDependencies = (
+				EE0000000000000000000002 /* LibraryCore */,
+			);
+			productName = TokenLibrary;
+			productReference = AA0000000000000000000011 /* TokenLibrary.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0A1000000000000000000004 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2600;
+			};
+			buildConfigurationList = 0A1000000000000000000001 /* Build configuration list for PBXProject "TokenLibrary" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = CC0000000000000000000001;
+			packageReferences = (
+				EE0000000000000000000010 /* LibraryCore */,
+			);
+			productRefGroup = CC0000000000000000000005 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				0A100000000000000000000B /* TokenLibrary-iOS */,
+				0A100000000000000000000C /* TokenLibrary-macOS */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		DD0000000000000000000021 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000031 /* editor in Resources */,
+				BB0000000000000000000040 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000022 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000032 /* editor in Resources */,
+				BB0000000000000000000041 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		DD0000000000000000000011 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000001 /* TokenLibraryApp.swift in Sources */,
+				BB0000000000000000000002 /* TokenLibraryRoot.swift in Sources */,
+				BB0000000000000000000003 /* PDFAnnotator.swift in Sources */,
+				BB0000000000000000000004 /* ExportGlyph.swift in Sources */,
+				BB0000000000000000000006 /* StickyNoteEditor.swift in Sources */,
+				BC0000000000000000000009 /* ConflictResolutionView.swift in Sources */,
+				BC0000000000000000000008 /* CatalogViews.swift in Sources */,
+				BC0000000000000000000050 /* CatalogActionFeedback.swift in Sources */,
+				BC0000000000000000000007 /* EditorWebView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD0000000000000000000012 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BB0000000000000000000011 /* TokenLibraryApp.swift in Sources */,
+				BB0000000000000000000012 /* TokenLibraryRoot.swift in Sources */,
+				BB0000000000000000000013 /* PDFAnnotator.swift in Sources */,
+				BB0000000000000000000014 /* ExportGlyph.swift in Sources */,
+				BB0000000000000000000016 /* StickyNoteEditor.swift in Sources */,
+				BD0000000000000000000009 /* ConflictResolutionView.swift in Sources */,
+				BD0000000000000000000008 /* CatalogViews.swift in Sources */,
+				BD0000000000000000000050 /* CatalogActionFeedback.swift in Sources */,
+				BD0000000000000000000007 /* EditorWebView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0A1000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				STRIP_INSTALLED_PRODUCT = NO;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		0A1000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		0A1000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_STYLE = Automatic;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				DEVELOPMENT_TEAM = 7728J3WTW8;
+				ENABLE_DEBUG_DYLIB = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iOS/Info.plist;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.tokenlibrary.ios;
+				PRODUCT_NAME = TokenLibrary;
+				SDKROOT = iphoneos;
+				STRIP_INSTALLED_PRODUCT = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		0A1000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = YES;
+				CODE_SIGNING_REQUIRED = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 7728J3WTW8;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = iOS/Info.plist;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				PRODUCT_BUNDLE_IDENTIFIER = app.tokenlibrary.ios;
+				PRODUCT_NAME = TokenLibrary;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		0A1000000000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.tokenlibrary.macos;
+				PRODUCT_NAME = TokenLibrary;
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+			};
+			name = Debug;
+		};
+		0A100000000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.tokenlibrary.macos;
+				PRODUCT_NAME = TokenLibrary;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0A1000000000000000000001 /* Build configuration list for PBXProject "TokenLibrary" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A1000000000000000000005 /* Debug */,
+				0A1000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		0A1000000000000000000002 /* Build configuration list for PBXNativeTarget "TokenLibrary-iOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A1000000000000000000007 /* Debug */,
+				0A1000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		0A1000000000000000000003 /* Build configuration list for PBXNativeTarget "TokenLibrary-macOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0A1000000000000000000009 /* Debug */,
+				0A100000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		EE0000000000000000000001 /* LibraryCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EE0000000000000000000010 /* LibraryCore */;
+			productName = LibraryCore;
+		};
+		EE0000000000000000000002 /* LibraryCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EE0000000000000000000010 /* LibraryCore */;
+			productName = LibraryCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		EE0000000000000000000010 /* LibraryCore */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = LibraryCore;
+		};
+/* End XCLocalSwiftPackageReference section */
+	};
+	rootObject = 0A1000000000000000000004 /* Project object */;
+}

@@ -1,0 +1,66 @@
+name: tokenlibrary
+x-runtime: &runtime
+  stop_grace_period: 30s
+  logging:
+    driver: local
+    options:
+      max-size: "10m"
+      max-file: "5"
+services:
+  postgres:
+    <<: *runtime
+    image: postgres:17-bookworm@sha256:639ab7ceb90e13123085b741fb31ef493fba25463002f6da665352e7b534b652
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tokenlibrary}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-tokenlibrary}
+    volumes:
+      - ${POSTGRES_DATA_ROOT:-${DATA_ROOT}/postgres}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tokenlibrary} -d ${POSTGRES_DB:-tokenlibrary}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:5432:5432"
+    networks:
+      - internal
+
+  app:
+    <<: *runtime
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-tokenlibrary}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-tokenlibrary}?sslmode=disable
+      DATA_ROOT: /data
+      BACKUP_ROOT: /backup
+      ADMIN_USERNAME: ${ADMIN_USERNAME}
+      ADMIN_PASSWORD_HASH: ${ADMIN_PASSWORD_HASH}
+      UPLOAD_TOKEN_HASH: ${UPLOAD_TOKEN_HASH}
+      UPLOAD_TOKEN_ENABLED: ${UPLOAD_TOKEN_ENABLED:-true}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://127.0.0.1:8080}
+      BACKUP_TIME: ${BACKUP_TIME:-03:00}
+      BACKUP_TIMEZONE: ${BACKUP_TIMEZONE:-Asia/Shanghai}
+      BACKUP_TIMEOUT: ${BACKUP_TIMEOUT:-20m}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LISTEN_ADDR: :8080
+      TOKENLIBRARY_TEST_HOOKS: ${TOKENLIBRARY_TEST_HOOKS:-0}
+      SCHEMA_PATH: /app/schema/initial.sql
+      CREDENTIAL_GENERATION: ${CREDENTIAL_GENERATION:-1}
+    volumes:
+      - ${DATA_ROOT}:/data
+      - ${BACKUP_ROOT}:/backup
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - internal
+    user: "${APP_UID:-10001}:${APP_GID:-10001}"
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge

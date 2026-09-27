@@ -1,0 +1,22 @@
+{
+  "name": "tokenlibrary-editor",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "npm run build && playwright test",
+    "test:ui": "playwright test"
+  },
+  "dependencies": {
+    "@milkdown/crepe": "7.22.2",
+    "@milkdown/kit": "7.22.2",
+    "dompurify": "3.4.16",
+    "katex": "0.18.0",
+    "marked": "17.0.1",
+    "mermaid": "11.17.2"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.58.2",
+    "esbuild": "0.27.2"
+  }
+}

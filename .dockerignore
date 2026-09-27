@@ -1,0 +1,10 @@
+.local
+.git
+.env
+.env.*
+!.env.example
+clients
+editor/node_modules
+ui-prototype
+*.md
+.planning
