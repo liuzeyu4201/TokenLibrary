@@ -34,13 +34,14 @@ type Server struct {
 	E      *synceng.Engine
 	J      *jobs.Runner
 	Logins *authn.LoginGate
+	Hub    *changeHub
 }
 
 func New(cfg config.Config, s *store.Store, j *jobs.Runner) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
-	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j, Logins: authn.NewLoginGate(time.Now)}
+	sv := &Server{Cfg: cfg, S: s, E: &synceng.Engine{S: s}, J: j, Logins: authn.NewLoginGate(time.Now), Hub: newChangeHub()}
 
 	r.GET("/health/live", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
 	r.GET("/health/ready", sv.ready)
@@ -269,6 +270,7 @@ func (s *Server) operations(c *gin.Context) {
 		env.Epoch = ep
 	}
 	res, err := s.E.Apply(c, env, "client", body)
+	s.notify(res)
 	s.writeOp(c, res, err)
 }
 
@@ -586,6 +588,7 @@ func (s *Server) importFile(c *gin.Context) {
 		env.DesiredSnapshot["pdfBlobId"] = bid.String()
 	}
 	res, err := s.E.Apply(c, env, "upload", input)
+	s.notify(res)
 	if res.HTTP >= 400 {
 		s.writeOp(c, res, err)
 		return
@@ -639,8 +642,11 @@ func (s *Server) importStatus(c *gin.Context) {
 	}, "requestId": reqID(c)})
 }
 
-func (s *Server) ws(c *gin.Context) {
-	c.JSON(200, gin.H{"data": gin.H{"ok": true, "note": "notifications optional over polling"}, "requestId": reqID(c)})
+func (s *Server) notify(res synceng.OpResult) {
+	if s.Hub == nil || res.HTTP == 0 || res.HTTP >= 400 || res.ChangeSeq <= 0 {
+		return
+	}
+	s.Hub.Publish(changeNote{Type: "changes_available", Epoch: s.S.Epoch.String(), LatestSequence: res.ChangeSeq})
 }
 
 func (s *Server) testBackupBegin(c *gin.Context) {

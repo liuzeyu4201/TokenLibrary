@@ -15,8 +15,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 
 	"tokenlibrary/internal/api"
 	"tokenlibrary/internal/authn"
@@ -561,6 +563,89 @@ func putBytes(t *testing.T, url string, body []byte, tok, epoch string) *http.Re
 		t.Fatal(err)
 	}
 	return res
+}
+
+func TestChangesAvailableDoesNotReplaceHTTPPull(t *testing.T) {
+	st, cfg := testdb.Start(t)
+	defer st.Close()
+	ts := httptest.NewServer(api.New(cfg, st, &jobs.Runner{S: st}))
+	defer ts.Close()
+	res := post(t, ts.URL+"/api/v1/auth/login", fmt.Sprintf(`{"username":"token","password":"local-dev-pass","deviceId":%q,"deviceName":"t","platform":"mac"}`, uuid.NewString()), "", "", "")
+	var login struct {
+		Data struct {
+			SessionToken, Epoch, RootID, DeviceID string
+		} `json:"data"`
+	}
+	mustJSON(t, read(t, res), &login)
+	header := http.Header{}
+	header.Set("Authorization", "Bearer "+login.Data.SessionToken)
+	header.Set("X-Library-Epoch", login.Data.Epoch)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(name, source string) {
+		t.Helper()
+		id := uuid.NewString()
+		op := uuid.NewString()
+		payload := fmt.Sprintf(`{"protocolVersion":1,"operationId":%q,"epoch":%q,"deviceId":%q,"objectId":%q,"action":"createMarkdown","desiredSnapshot":{"name":%q,"parentId":%q,"markdownSource":%q}}`,
+			op, login.Data.Epoch, login.Data.DeviceID, id, name, login.Data.RootID, source)
+		res := post(t, ts.URL+"/api/v1/sync/operations", payload, login.Data.SessionToken, login.Data.Epoch, op)
+		if res.StatusCode != 201 {
+			t.Fatalf("create %s %d %s", name, res.StatusCode, read(t, res))
+		}
+		_ = read(t, res)
+	}
+	create("first.md", "first")
+	var note struct {
+		Type           string `json:"type"`
+		Epoch          string `json:"epoch"`
+		LatestSequence int64  `json:"latestSequence"`
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err = conn.ReadJSON(&note); err != nil {
+		t.Fatal(err)
+	}
+	if note.Type != "changes_available" || note.Epoch != login.Data.Epoch || note.LatestSequence < 1 {
+		t.Fatalf("notification: %+v", note)
+	}
+	pong := make(chan struct{}, 1)
+	conn.SetPongHandler(func(string) error {
+		pong <- struct{}{}
+		return nil
+	})
+	if err = conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	go func() { _, _, _ = conn.ReadMessage() }()
+	select {
+	case <-pong:
+	case <-time.After(5 * time.Second):
+		t.Fatal("server did not pong")
+	}
+	_ = conn.Close()
+
+	again, _, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	create("second.md", "second-after-reconnect")
+	_ = again.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err = again.ReadJSON(&note); err != nil {
+		t.Fatal(err)
+	}
+	if note.Type != "changes_available" || note.LatestSequence < 2 {
+		t.Fatalf("reconnect notification: %+v", note)
+	}
+	_ = again.Close()
+	create("third.md", "third-while-socket-down")
+	pulled := get(t, ts.URL+"/api/v1/sync/changes?after=0", login.Data.SessionToken, login.Data.Epoch)
+	body := read(t, pulled)
+	if pulled.StatusCode != 200 || !strings.Contains(body, "third-while-socket-down") {
+		t.Fatalf("http pull after dropped notification %d %s", pulled.StatusCode, body)
+	}
 }
 
 func TestUploadTokenImportStatus(t *testing.T) {
