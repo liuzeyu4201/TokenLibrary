@@ -901,11 +901,15 @@ struct CatalogInspectorView: View {
         }
     }
 
-    private func replacePDFOriginal(_ result: Result<URL, Error>) {
+    private func replacePDFOriginal(_ result: Result<[URL], Error>) {
         switch result {
         case .failure(let error):
             errorMessage = error.localizedDescription
-        case .success(let url):
+        case .success(let urls):
+            guard let url = urls.first else {
+                errorMessage = "没有选中 PDF。"
+                return
+            }
             let access = url.startAccessingSecurityScopedResource()
             defer { if access { url.stopAccessingSecurityScopedResource() } }
             do {
